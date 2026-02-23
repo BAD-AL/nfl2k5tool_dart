@@ -349,7 +349,10 @@ class GamesaveTool {
           firstPlayerLoc = playerLoc;
       }
     }
-    if (firstPlayerLoc != mPlayerStart)
+    // Only update if a candidate was actually found; if firstPlayerLoc stayed
+    // at GameSaveData!.length it means no valid player was found and we must
+    // leave mPlayerStart at the hard-coded default for this save type.
+    if (firstPlayerLoc < GameSaveData!.length && firstPlayerLoc != mPlayerStart)
       mPlayerStart = firstPlayerLoc;
   }
 
@@ -392,6 +395,36 @@ class GamesaveTool {
   }
 
   int get FirstPlayerFnamePointerLoc => mPlayerStart + 0x10;
+
+  /// Returns [true] if any two player name pointers (fname or lname) resolve
+  /// to the same address within the modifiable name section.
+  ///
+  /// Community-edited roster files built with Flying Finn's editor re-use a
+  /// single string entry for multiple players to conserve space.  When [SetName]
+  /// overwrites such a shared entry, every player that references it gets
+  /// silently renamed.  Callers should treat a [true] result as a warning that
+  /// in-place name edits may have unintended side-effects.
+  ///
+  /// Returns [false] when every player pointer destination is unique — the
+  /// standard layout produced by the base game and this tool.
+  bool checkNamePointers() {
+    final Set<int> seen = {};
+    bool hasShared = false;
+    for (int player = 0; player <= mMaxPlayers; player++) {
+      final int fnamePtrLoc = player * _cPlayerDataLength + FirstPlayerFnamePointerLoc;
+      final int lnamePtrLoc = fnamePtrLoc + 4;
+      for (final int ptrLoc in [fnamePtrLoc, lnamePtrLoc]) {
+        final int dest = GetPointerDestination(ptrLoc);
+        if (dest < mStringTableStart || dest >= mModifiableNameSectionEnd) continue;
+        if (!seen.add(dest)) hasShared = true;
+      }
+    }
+    stderr.writeln(hasShared
+        ? '#checkNamePointers: shared name pointers detected – '
+            'SetName may overwrite names used by multiple players'
+        : '#checkNamePointers: all player name pointers are unique');
+    return hasShared;
+  }
 
   static List<String> sTeamsDataOrder = [
     '49ers', 'Bears', 'Bengals', 'Bills', 'Broncos', 'Browns', 'Buccaneers', 'Cardinals',
@@ -883,6 +916,7 @@ class GamesaveTool {
           InitializeForRoster();
         else
           InitializeForFranchise();
+        checkNamePointers();
         retVal = true;
       }
     }
@@ -1369,10 +1403,25 @@ class GamesaveTool {
   }
 
   void SetName(String name, int ptrLoc) {
+    int stringLoc = GetPointerDestination(ptrLoc);
+
+    // BUG FIX 4: Reject pointers that resolve outside the modifiable name
+    // section.  Without this guard, ShiftDataDown/Up would start from an
+    // out-of-bounds address and overwrite neighbouring file sections (boundary
+    // overwrite).  The ensuing AdjustPlayerNamePointers call would then corrupt
+    // all valid name pointers using the wrong shift origin.
+    if (stringLoc < mStringTableStart || stringLoc >= mModifiableNameSectionEnd) {
+      stderr.writeln(
+          '#SetName: skipping – pointer at 0x${ptrLoc.toRadixString(16)} '
+          'resolves to 0x${stringLoc.toRadixString(16)}, outside modifiable '
+          'name range 0x${mStringTableStart.toRadixString(16)}–'
+          '0x${mModifiableNameSectionEnd.toRadixString(16)}');
+      return;
+    }
+
     String prevName = GetName(ptrLoc);
     if (prevName != name) {
       int diff = 2 * (name.length - prevName.length);
-      int stringLoc = GetPointerDestination(ptrLoc);
 
       if (diff > 0)
         ShiftDataDown(stringLoc, diff, mModifiableNameSectionEnd);
@@ -1380,6 +1429,8 @@ class GamesaveTool {
         ShiftDataUp(stringLoc, -1 * diff, mModifiableNameSectionEnd);
 
       AdjustPlayerNamePointers(stringLoc + 2 * prevName.length, diff);
+      // BUG FIX 3: also slide any college-entry name pointers that were shifted.
+      _adjustCollegeEntryPointers(stringLoc + 2 * prevName.length, diff);
 
       for (int i = 0; i < name.length; i++) {
         SetByte(stringLoc, name.codeUnitAt(i));
@@ -1573,19 +1624,45 @@ class GamesaveTool {
     }
   }
 
+  // BUG FIX 3: When SetName shifts bytes in the string table (via ShiftDataDown/Up),
+  // player fname/lname pointers are updated by AdjustPlayerNamePointers, but the
+  // college-entry table (~0xA830–0xAFA7) also holds relative pointers into the
+  // string table for college name strings.  Those pointers were never adjusted,
+  // causing GetCollege() to return stale (wrong) names after any name-length change.
+  //
+  // This helper adjusts the name pointer inside every college entry that points
+  // to a location at or after [locationOfChange] in the string table.
+  // [Colleges.values] gives the absolute file offset of each 8-byte college entry;
+  // the first 4 bytes of that entry are a relative pointer to the college name string.
+  void _adjustCollegeEntryPointers(int locationOfChange, int difference) {
+    for (int entryLoc in Colleges.values) {
+      int nameLoc = GetPointerDestination(entryLoc);
+      if (nameLoc >= locationOfChange && nameLoc < mModifiableNameSectionEnd)
+        AdjustPointer(entryLoc, difference);
+    }
+  }
+
   void AdjustPointer(int namePointerLoc, int change) {
-    int pointer = GameSaveData![namePointerLoc + 2] << 16;
+    // BUG FIX 2: The original code read only bytes 0–2 (24 bits) and wrote
+    // them back, leaving byte 3 stale.  GetPointerDestination reads all four
+    // bytes as a signed 32-bit integer, so any carry out of byte 2 would make
+    // the recovered destination wildly wrong on the next read.  The fix mirrors
+    // the exact same 4-byte signed-integer scheme used by GetPointerDestination.
+    int pointer = GameSaveData![namePointerLoc + 3] << 24;
+    pointer += GameSaveData![namePointerLoc + 2] << 16;
     pointer += GameSaveData![namePointerLoc + 1] << 8;
     pointer += GameSaveData![namePointerLoc];
+    // Sign-extend from 32-bit to Dart's 64-bit int (same logic as GetPointerDestination).
+    if (pointer >= 0x80000000) pointer -= 0x100000000;
 
     pointer += change;
-    int b1 = pointer & 0xff;
-    int b2 = (pointer >> 8) & 0xff;
-    int b3 = (pointer >> 16) & 0xff;
 
-    SetByte(namePointerLoc, b1);
-    SetByte(namePointerLoc + 1, b2);
-    SetByte(namePointerLoc + 2, b3);
+    // Write all four bytes back so the stored pointer stays consistent with
+    // the 32-bit signed format that GetPointerDestination expects.
+    SetByte(namePointerLoc,     pointer & 0xff);
+    SetByte(namePointerLoc + 1, (pointer >> 8)  & 0xff);
+    SetByte(namePointerLoc + 2, (pointer >> 16) & 0xff);
+    SetByte(namePointerLoc + 3, (pointer >> 24) & 0xff);
   }
 
   Uint8List GetPlayerBytes(int player) {

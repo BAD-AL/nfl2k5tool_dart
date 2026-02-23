@@ -24,7 +24,7 @@ class InputParserTeamTracker {
 
 class InputParser {
   final RegExp mTeamRegex = RegExp(r'Team\s*=\s*([0-9a-zA-Z]+)');
-  final RegExp mWeekRegex = RegExp(r'(?i)Week\s([1-9][0-7]?)');
+  final RegExp mWeekRegex = RegExp(r'Week\s([1-9]\d?)', caseSensitive: false, );
   final RegExp mGameRegex = RegExp(r'([0-9a-z]+)\s+at\s+([0-9a-zA-Z]+)');
   final RegExp mYearRegex = RegExp(r'YEAR\s*=\s*([0-9]+)', caseSensitive: false);
 
