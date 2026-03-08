@@ -1,6 +1,7 @@
 name: nfl2k5tool_dart
 description: Dart translation of NFL2K5Tool - reads and modifies NFL2K5 gamesave files.
 version: 1.0.0
+publish_to: none
 
 environment:
   sdk: ^3.10.8
@@ -9,6 +10,12 @@ dependencies:
   path: ^1.9.0
   archive: ^3.6.0
   crypto: ^3.0.0
+  dart_mymc:
+    git:
+      url: https://github.com/BAD-AL/dart_mymc.git
+  xbox_memory_unit_tool:
+    git:
+      url: https://github.com/BAD-AL/xbox_memory_unit_tool.git
 
 dev_dependencies:
   lints: ^6.0.0

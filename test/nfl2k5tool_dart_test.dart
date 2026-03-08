@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:nfl2k5tool_dart/nfl2k5tool_dart.dart';
 import 'package:nfl2k5tool_dart/gamesave_tool_io.dart';
-import 'package:nfl2k5tool_dart/static_utils_io.dart';
 import 'package:test/test.dart';
 
 /// Path to test data files, relative to the repo root.
