@@ -1,7 +1,6 @@
 // Translated from GamesaveTool.cs
 // ignore_for_file: non_constant_identifier_names
 
-import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'enum_definitions.dart';
@@ -9,6 +8,7 @@ import 'static_utils.dart';
 import 'data_map.dart';
 import 'depth_chart.dart';
 import 'scheduler_helper.dart';
+import 'logger.dart';
 
 /// The class that reads and modifies the xbox game save file.
 class GamesaveTool {
@@ -39,13 +39,25 @@ class GamesaveTool {
   SaveType get saveType => mSaveType;
   void _SetSaveType(SaveType value) {
     mSaveType = value;
-    stderr.writeln('#Loading SaveType:${value.name}');
+    Logger.log('#Loading SaveType:${value.name}');
   }
 
   String mZipFile = '';
 
   Uint8List? GameSaveData;
   int Year = 0;
+
+  void loadSaveData(Uint8List data) {
+    GameSaveData = data;
+    mColleges.clear();
+    if (GameSaveData![0] == 0x52 && GameSaveData![1] == 0x4F &&
+        GameSaveData![2] == 0x53 && GameSaveData![3] == 0x54) {
+      InitializeForRoster();
+    } else {
+      InitializeForFranchise();
+    }
+    checkNamePointers();
+  }
 
   GamesaveTool() {
     mCoachMap['Dennis Green'] = 0x00;
@@ -419,7 +431,7 @@ class GamesaveTool {
         if (!seen.add(dest)) hasShared = true;
       }
     }
-    stderr.writeln(hasShared
+    Logger.log(hasShared
         ? '#checkNamePointers: shared name pointers detected – '
             'SetName may overwrite names used by multiple players'
         : '#checkNamePointers: all player name pointers are unique');
@@ -579,7 +591,7 @@ class GamesaveTool {
   }
 
   void AutoUpdatePBP() {
-    stdout.writeln('#AutoUpdatePBP');
+    Logger.log('#AutoUpdatePBP');
     String key, firstName, lastName, number, val;
     for (int player = 0; player < MaxPlayers; player++) {
       firstName = GetPlayerFirstName(player);
@@ -602,7 +614,7 @@ class GamesaveTool {
   }
 
   void AutoUpdatePhoto() {
-    stdout.writeln('#AutoUpdatePhoto');
+    Logger.log('#AutoUpdatePhoto');
     String key, firstName, lastName, number, val;
     for (int player = 0; player < MaxPlayers; player++) {
       firstName = GetPlayerFirstName(player);
@@ -725,7 +737,7 @@ class GamesaveTool {
   }
 
   void AutoUpdateDepthChart() {
-    stdout.writeln('#AutoUpdateDepthChart');
+    Logger.log('#AutoUpdateDepthChart');
     for (int i = 0; i < 32; i++) {
       AutoUpdateDepthChartForTeam(sTeamsDataOrder[i]);
     }
@@ -893,74 +905,6 @@ class GamesaveTool {
       } else {
         throw StateError("Error setting special teamer! '$theName' is not on the team!");
       }
-    }
-  }
-
-  bool LoadSaveFile(String fileName) {
-    bool retVal = false;
-    File f = File(fileName);
-    if (f.existsSync()) {
-      if (fileName.toLowerCase().endsWith('.dat')) {
-        mZipFile = '';
-        GameSaveData = f.readAsBytesSync();
-      } else if (fileName.toLowerCase().endsWith('.zip')) {
-        GameSaveData = StaticUtils.ExtractFileFromZip(fileName, null, 'SAVEGAME.DAT');
-        mZipFile = fileName;
-      } else {
-        return false;
-      }
-      if (GameSaveData != null) {
-        mColleges.clear();
-        if (GameSaveData![0] == 0x52 && GameSaveData![1] == 0x4F &&
-            GameSaveData![2] == 0x53 && GameSaveData![3] == 0x54)
-          InitializeForRoster();
-        else
-          InitializeForFranchise();
-        checkNamePointers();
-        retVal = true;
-      }
-    }
-    return retVal;
-  }
-
-  void SaveFile(String fileName) {
-    File f = File(fileName);
-    bool isReadOnly = false;
-    if (f.existsSync()) {
-      try {
-        RandomAccessFile raf = f.openSync(mode: FileMode.append);
-        raf.closeSync();
-      } catch (e) {
-        isReadOnly = true;
-      }
-    }
-    if (isReadOnly) {
-      StaticUtils.AddError("File: '$fileName' is Read only");
-    } else if (fileName.toLowerCase().endsWith('.dat')) {
-      if (f.existsSync()) {
-        f.deleteSync();
-      }
-      f.writeAsBytesSync(GameSaveData!);
-      String extraFile = "${f.parent.path}/EXTRA";
-      String tmpFile = '${Directory.systemTemp.path}/nfl2k5_${DateTime.now().millisecondsSinceEpoch}.tmp';
-      StaticUtils.SignNfl2K5SaveForXbox(tmpFile, GameSaveData!);
-      File(tmpFile).copySync(extraFile);
-      File(tmpFile).deleteSync();
-      stderr.writeln('# Data successfully written to file: $fileName.');
-    } else if (fileName.toLowerCase().endsWith('.zip')) {
-      if (mZipFile.isNotEmpty && mZipFile != fileName)
-        File(mZipFile).copySync(fileName);
-      String tmpFile = '${Directory.systemTemp.path}/nfl2k5_${DateTime.now().millisecondsSinceEpoch}.tmp';
-      File(tmpFile).writeAsBytesSync(GameSaveData!);
-      StaticUtils.ReplaceFileInArchive(fileName, null, 'SAVEGAME.DAT', tmpFile);
-      File(tmpFile).deleteSync();
-
-      tmpFile = '${Directory.systemTemp.path}/nfl2k5_${DateTime.now().millisecondsSinceEpoch}.tmp';
-      StaticUtils.SignNfl2K5SaveForXbox(tmpFile, GameSaveData!);
-      StaticUtils.ReplaceFileInArchive(fileName, null, 'EXTRA', tmpFile);
-      File(tmpFile).deleteSync();
-    } else {
-      StaticUtils.AddError('Error! Need to specify a .zip, .max or .DAT file name. If specifying a zip file, the original file loaded must have come from a zip.');
     }
   }
 
@@ -1334,7 +1278,7 @@ class GamesaveTool {
           SetByte(loc + 1, v2);
           SetByte(loc + 2, v3);
         } else {
-          stderr.writeln("#Note: DOB format = 'dd/mm/yyyy'");
+          Logger.log("#Note: DOB format = 'dd/mm/yyyy'");
           throw FormatException("Error! DOB incorrectly formatted '$stringVal'");
         }
         break;
@@ -1406,7 +1350,7 @@ class GamesaveTool {
     // overwrite).  The ensuing AdjustPlayerNamePointers call would then corrupt
     // all valid name pointers using the wrong shift origin.
     if (stringLoc < mStringTableStart || stringLoc >= mModifiableNameSectionEnd) {
-      stderr.writeln(
+      Logger.log(
           '#SetName: skipping – pointer at 0x${ptrLoc.toRadixString(16)} '
           'resolves to 0x${stringLoc.toRadixString(16)}, outside modifiable '
           'name range 0x${mStringTableStart.toRadixString(16)}–'
@@ -2143,7 +2087,7 @@ class GamesaveTool {
       if (retVal.contains(','))
         retVal = '"$retVal"';
     } catch (e) {
-      stderr.writeln('Invalid college detected for player ${GetPlayerName(player, ' ')}, on team ${GetPlayerTeam(player)}; Returning \'None\'.');
+      Logger.error('Invalid college detected for player ${GetPlayerName(player, ' ')}, on team ${GetPlayerTeam(player)}; Returning \'None\'.');
     }
     return retVal;
   }
@@ -2251,9 +2195,9 @@ class GamesaveTool {
     String? retVal;
     try {
       if (formulaMode != FormulaMode.Normal) {
-        stdout.writeln("ApplyFormula('$formula','$targetAttribute','$targetValue', [${positions.join(',')}], ${formulaMode.name})");
+        Logger.log("ApplyFormula('$formula','$targetAttribute','$targetValue', [${positions.join(',')}], ${formulaMode.name})");
       } else {
-        stdout.writeln("ApplyFormula('$formula','$targetAttribute','$targetValue', [${positions.join(',')}])");
+        Logger.log("ApplyFormula('$formula','$targetAttribute','$targetValue', [${positions.join(',')}])");
       }
 
       if (formula.toLowerCase() == 'always') formula = 'true';
@@ -2463,62 +2407,4 @@ class GamesaveTool {
     return false;
   }
 
-  String GetPlayerPhotoPCSX2Yaml() {
-    StringBuffer sb = StringBuffer();
-    String path = '';
-    String? hash;
-    sb.write('# Photo map located at:\n');
-    sb.write('# $sPhotoHashMapPath\n');
-
-    for (int i = 0; i < mMaxPlayers; i++) {
-      hash = LookupPhotoHash(i);
-      if (hash != null) {
-        path = '@COM/2k5/photos_dds/${GetPlayerPosition(i)}_${GetPlayerFirstName(i)}${GetPlayerLastName(i)}.dds';
-        sb.write('  ');
-        sb.write(hash);
-        sb.write(': "');
-        sb.write(path);
-        sb.write('"\n');
-      } else {
-        sb.write("  # Photo '${GetAttribute(i, PlayerOffsets.Photo)}' not assignable; '${GetPlayerPosition(i)} ${GetPlayerFirstName(i)} ${GetPlayerLastName(i)}'\n");
-      }
-    }
-    return sb.toString();
-  }
-
-  String? LookupPhotoHash(int playerIndex) {
-    String photo_str = GetAttribute(playerIndex, PlayerOffsets.Photo);
-    int photo_number = int.parse(photo_str);
-    if (PhotoHashMap.containsKey(photo_number))
-      return PhotoHashMap[photo_number];
-    return null;
-  }
-
-  static String sPhotoHashMapPath = 'PlayerData/Photo_Hash_Map.csv';
-  Map<int, String>? mPhotoHashMap;
-  final RegExp sHashRegex = RegExp(r'[0-9A-Fx]+');
-
-  Map<int, String> get PhotoHashMap {
-    if (mPhotoHashMap == null) {
-      File f = File(sPhotoHashMapPath);
-      if (f.existsSync()) {
-        List<String> lines = f.readAsStringSync().split('\n');
-        mPhotoHashMap = {};
-        for (String line in lines) {
-          List<String> parts = line.split(',');
-          if (parts.length == 2 && line.length > 4) {
-            if (sHashRegex.firstMatch(parts[1]) == null) continue;
-            if (!parts[1].startsWith('0x'))
-              parts[1] = '0x' + parts[1];
-            int key = int.tryParse(parts[0]) ?? -1;
-            if (key >= 0)
-              mPhotoHashMap![key] = parts[1];
-          }
-        }
-      } else {
-        throw FileSystemException("Path '$sPhotoHashMapPath' not found!");
-      }
-    }
-    return mPhotoHashMap!;
-  }
 }

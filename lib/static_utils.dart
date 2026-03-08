@@ -1,25 +1,23 @@
-// Translated from StaticUtils.cs
-// Uses package:archive for zip operations and package:crypto for HMAC-SHA1
 // ignore_for_file: non_constant_identifier_names
 
-import 'dart:io';
 import 'dart:typed_data';
-import 'package:archive/archive_io.dart';
+import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
+import 'logger.dart';
 
 /// Static utility functions.
 class StaticUtils {
   StaticUtils._(); // prevent instantiation
 
   static void WriteError(String err){
-    stderr.writeln(err);
+    Logger.error(err);
   }
 
   // #region Error functionality
   /// A place to keep all the processing errors.
   static List<String> Errors = [];
 
-  /// Shows the errors (if any exist) to stderr.
+  /// Shows the errors (if any exist) to logger.
   static void ShowErrors() {
     if (Errors.isNotEmpty) {
       StringBuffer b = StringBuffer();
@@ -27,7 +25,7 @@ class StaticUtils {
         b.write(s);
         b.write('\n');
       }
-      stderr.writeln(b.toString());
+      Logger.error(b.toString());
       Errors = [];
     }
   }
@@ -117,80 +115,39 @@ class StaticUtils {
 
   // #region Zip file handling
 
-  /// Extracts all files from a zip to the specified output folder.
-  static void ExtractZipFile(String archiveFilenameIn, String? password, String outFolder) {
-    final bytes = File(archiveFilenameIn).readAsBytesSync();
-    final archive = ZipDecoder().decodeBytes(bytes, password: password);
-    for (final file in archive) {
-      if (!file.isFile) continue;
-      final outPath = '$outFolder/${file.name}';
-      final dir = File(outPath).parent;
-      if (!dir.existsSync()) dir.createSync(recursive: true);
-      File(outPath).writeAsBytesSync(file.content as List<int>);
-    }
-  }
-
-  static String _UnzipToTempFolder(String archiveFilenameIn, String? password) {
-    String dirName = '${Directory.systemTemp.path}/NFL2K5ToolTmpZipUnpack';
-    final dir = Directory(dirName);
-    if (dir.existsSync()) dir.deleteSync(recursive: true);
-    ExtractZipFile(archiveFilenameIn, password, dirName);
-    return dirName;
-  }
-
-  /// Extract a specific file from a zip file.
+  /// Extract a specific file from zip data.
   /// Returns null if file was not found.
-  static Uint8List? ExtractFileFromZip(String archiveFilenameIn, String? password, String fileToExtract) {
-    Uint8List? retVal;
-    String dirName = _UnzipToTempFolder(archiveFilenameIn, password);
-    // Search recursively for the file
-    final dir = Directory(dirName);
-    if (dir.existsSync()) {
-      for (final entity in dir.listSync(recursive: true)) {
-        if (entity is File && entity.path.split('/').last == fileToExtract) {
-          retVal = entity.readAsBytesSync();
-          break;
-        }
+  static Uint8List? ExtractFileFromZipData(Uint8List zipData, String? password, String fileToExtract) {
+    final archive = ZipDecoder().decodeBytes(zipData, password: password);
+    for (final file in archive) {
+      if (file.isFile && file.name.split('/').last == fileToExtract) {
+        return file.content as Uint8List;
       }
-      dir.deleteSync(recursive: true);
     }
-    return retVal;
+    return null;
   }
 
-  static void ReplaceFileInArchive(String archiveFilenameIn, String? password, String fileToReplace, String newFilePath) {
-    String dirName = _UnzipToTempFolder(archiveFilenameIn, password);
-    // Find and replace the file
-    final dir = Directory(dirName);
-    if (dir.existsSync()) {
-      for (final entity in dir.listSync(recursive: true)) {
-        if (entity is File && entity.path.split('/').last == fileToReplace) {
-          File(newFilePath).copySync(entity.path);
-          break;
-        }
+  /// Replace a file in zip data with new data.
+  /// Returns the updated zip data.
+  static Uint8List ReplaceFileInZipData(Uint8List zipData, String? password, String fileToReplace, Uint8List newFileData) {
+    final archive = ZipDecoder().decodeBytes(zipData, password: password);
+    final newArchive = Archive();
+    
+    bool replaced = false;
+    for (final file in archive) {
+      if (file.isFile && file.name.split('/').last == fileToReplace) {
+        newArchive.addFile(ArchiveFile(file.name, newFileData.length, newFileData));
+        replaced = true;
+      } else {
+        newArchive.addFile(file);
       }
     }
 
-    // Repack the directory into a zip
-    String outPathname = '${Directory.systemTemp.path}/nfl2k5tool_tmp_${DateTime.now().millisecondsSinceEpoch}.zip';
-    final encoder = ZipFileEncoder();
-    encoder.create(outPathname);
-    _CompressFolder(dir, encoder, dirName.length + 1);
-    encoder.close();
-
-    File(outPathname).copySync(archiveFilenameIn);
-    File(outPathname).deleteSync();
-    dir.deleteSync(recursive: true);
-  }
-
-  static void _CompressFolder(Directory dir, ZipFileEncoder zipEncoder, int folderOffset) {
-    for (final entity in dir.listSync()) {
-      if (entity is File) {
-        final entryName = entity.path.substring(folderOffset).replaceAll('\\', '/');
-        zipEncoder.addFile(entity, entryName);
-      } else if (entity is Directory) {
-        _CompressFolder(entity, zipEncoder, folderOffset);
-      }
+    if (!replaced) {
+      newArchive.addFile(ArchiveFile(fileToReplace, newFileData.length, newFileData));
     }
+
+    return Uint8List.fromList(ZipEncoder().encode(newArchive)!);
   }
   // #endregion
 
@@ -201,20 +158,12 @@ class StaticUtils {
     0xE9, 0x38, 0xDA, 0x75, 0x63, 0x93, 0xFF, 0x80
   ];
 
-  /// Signs the NFL2K5 xbox save file.
-  /// The EXTRA file is signed/hashed with the SAVEGAME.DAT data and the 2K5 key.
-  static void SignNfl2K5SaveForXbox(String fileToSign, Uint8List dataToHash) {
-    _SignFile(_mNFL2K5Key, fileToSign, dataToHash);
-  }
-
-  static void _SignFile(List<int> key, String fileToSign, Uint8List dataToHash) {
-    try {
-      final hmac = Hmac(sha1, key);
-      final digest = hmac.convert(dataToHash);
-      File(fileToSign).writeAsBytesSync(Uint8List.fromList(digest.bytes));
-    } catch (e) {
-      Errors.add('Error signing file! $fileToSign');
-    }
+  /// Signs the NFL2K5 xbox save data.
+  /// Returns the signature as bytes.
+  static Uint8List SignNfl2K5SaveData(Uint8List dataToHash) {
+    final hmac = Hmac(sha1, _mNFL2K5Key);
+    final digest = hmac.convert(dataToHash);
+    return Uint8List.fromList(digest.bytes);
   }
   // #endregion
 }

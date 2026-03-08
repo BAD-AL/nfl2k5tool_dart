@@ -3,9 +3,11 @@
 
 import 'dart:io';
 import 'gamesave_tool.dart';
+import 'gamesave_tool_io.dart';
 import 'input_parser.dart';
 import 'enum_definitions.dart';
 import 'static_utils.dart';
+import 'logger.dart';
 
 class Program {
   static String get Version => '1.0.0';
@@ -63,7 +65,7 @@ class Program {
           else if (args[i].startsWith('-CoachKey:'))
             coachKey = args[i].substring(10);
           else
-            stderr.writeln('Argument not applied: ${args[i]}');
+            Logger.error('Argument not applied: ${args[i]}');
           break;
       }
     }
@@ -73,11 +75,11 @@ class Program {
       try {
         tool = GamesaveTool();
         if (!tool.LoadSaveFile(saveFileName)) {
-          stderr.writeln("File '$saveFileName' does not exist. Make sure you have the correct path to the file specified.");
+          Logger.error("File '$saveFileName' does not exist. Make sure you have the correct path to the file specified.");
           return;
         }
       } catch (e) {
-        stderr.writeln("Error loading file '$saveFileName'. Make sure it is an actual NFL2K5 roster or franchise file.");
+        Logger.error("Error loading file '$saveFileName'. Make sure it is an actual NFL2K5 roster or franchise file.");
         return;
       }
     }
@@ -152,9 +154,9 @@ class Program {
         builder.write(lookupPlayers);
 
       String output = builder.toString();
-      stdout.write(output);
+      Logger.log(output);
     } else {
-      stderr.writeln('Error! you need to specify a valid save file.');
+      Logger.error('Error! you need to specify a valid save file.');
       _PrintUsage();
       return;
     }
@@ -163,7 +165,7 @@ class Program {
   }
 
   static void _PrintUsage() {
-    stdout.write('''NFL2K5Tool Version $Version
+    Logger.log('''NFL2K5Tool Version $Version
 
 This program can extract data from and import data into a NFL2K5 Save game files.
 
