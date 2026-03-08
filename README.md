@@ -123,6 +123,44 @@ dart bin/nfl2k5tool_dart.dart MyRoster.zip input.txt -out:MyRoster_mod.zip
 dart bin/nfl2k5tool_dart.dart MyRoster.zip input.txt -audc -dc -fa -ab
 ```
 
+## API
+
+`nfl2k5tool_dart` is fully compatible with Dart/Flutter Web. Since the browser does not have a file system (`dart:io`), you should use the `SaveSession` class to handle byte buffers directly.
+
+The library's "super power" is its ability to produce and consume structured CSV-like text, which makes it easy to integrate with UI tables or bulk-editing tools.
+
+### Web/Library Usage Example
+
+```dart
+import 'dart:typed_data';
+import 'package:nfl2k5tool_dart/nfl2k5tool_dart.dart';
+
+void onFilePicked(Uint8List fileBytes) {
+  // 1. Initialize a session from bytes (handles Xbox/PS2 formats & signing)
+  SaveSession session = SaveSession.fromXboxZip(fileBytes); 
+  GamesaveTool engine = session.engine;
+
+  // 2. Extract data as CSV-formatted strings
+  // Get all player abilities (Speed, Agility, etc.)
+  String playerCsv = engine.GetLeaguePlayers(true, false, false);
+  String modifiedCsv = myFunctionThatDoesStuff(playerCsv);
+
+  // 3. Apply modifications using InputParser
+  InputParser parser = InputParser(engine);
+  parser.ProcessText(modifiedCsv);
+  
+  // 4. Export the modified save as bytes for download
+  Uint8List modifiedFile = session.exportToXboxZip();
+  // ... save via browser download or 'dart:io' stuff ...
+}
+```
+
+### Core Classes
+
+- **`SaveSession`**: The entry point for loading and saving different formats (`fromXboxZip`, `fromPs2Save`, `exportToPs2Max`, etc.). It manages the platform-specific signing and metadata automatically.
+- **`GamesaveTool`**: The core engine that performs byte-level operations. Use its `Get...` methods to extract data as strings.
+- **`InputParser`**: A high-level utility to process text.
+
 ## Related Projects
 
 - [NFL2K5Tool (C#)](https://github.com/BAD-AL/NFL2K5Tool) - The original C# implementation.
