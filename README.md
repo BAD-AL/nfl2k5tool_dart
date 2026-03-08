@@ -1,6 +1,6 @@
 # NFL2K5Tool Dart
 
-A Dart translation of the `NFL2K5Tool`, designed to read and modify NFL 2K5 game save files (rosters and franchise saves) for both Xbox and PlayStation 2.
+A Dart translation of `NFL2K5Tool`, designed to read and modify NFL 2K5 game save files (rosters and franchise saves) for both Xbox and PlayStation 2.
 
 **Why Dart?**
 Dart is a cross-platform language that can be run as a script (via the dart runtime) or can be natively compiled to Linux, Windows, Mac, iOS, Android, or Browser(JavaScript / wasm).
@@ -10,7 +10,7 @@ As the Windows operating system declines, I feel it's important to enable progra
 ## Features
 
 - **Read Save Data:** Extract player, coach, and schedule information from multiple formats.
-- **Modify Save Data:** Apply changes from text files to your game saves.
+- **Modify Save Data:** Apply changes made to your game saves.
 - **Platform Support:** Handles both Xbox and PS2 save formats via `xbox_memory_unit_tool` and `dart_mymc`.
 - **Supported Formats:**
   - **Xbox:**
@@ -38,7 +38,14 @@ As the Windows operating system declines, I feel it's important to enable progra
    ```bash
    dart pub get
    ```
+3. Compile:
+  ```bash
+  # compile Linux
+  dart compile exe bin/nfl2k5tool_dart.dart -o nfl2k5tool
 
+  # compile windows
+  dart compile exe bin/nfl2k5tool_dart.dart -o nfl2k5tool.exe
+  ```
 ## Data Import/Export
 
 NFL2K5Tool Dart provides robust support for a variety of save formats across platforms, making it easy to transfer data between emulators (Xemu, PCSX2), real hardware (via memory card tools), and community roster files.
