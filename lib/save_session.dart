@@ -71,6 +71,14 @@ class SaveSession {
     return session;
   }
 
+  /// Creates a session from a raw Xbox SAVEGAME.DAT.
+  static SaveSession fromRawDat(Uint8List datBytes) {
+    final engine = GamesaveTool();
+    engine.loadSaveData(datBytes);
+    final metadata = SaveMetadata(sourcePlatform: SavePlatform.xbox);
+    return SaveSession(engine, metadata);
+  }
+
   /// Opens an Xbox ZIP bundle.
   static SaveSession fromXboxZip(Uint8List zipBytes) {
     final archive = ZipDecoder().decodeBytes(zipBytes);

@@ -74,7 +74,7 @@ extension GamesaveToolIo on GamesaveTool {
       f.writeAsBytesSync(zipData);
       Logger.log('# Data successfully written to file: $fileName.');
     } else {
-      StaticUtils.AddError('Error! Need to specify a .zip, .max or .DAT file name.');
+      StaticUtils.AddError('Error! Unsupported file extension: "$fileName". Use .dat or .zip for raw Xbox saves, or ensure you are using a full SaveSession for PS2/MU formats.');
     }
   }
 }

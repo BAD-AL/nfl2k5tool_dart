@@ -4,6 +4,8 @@
 import 'dart:io';
 import 'gamesave_tool.dart';
 import 'gamesave_tool_io.dart';
+import 'save_session.dart';
+import 'save_metadata.dart';
 import 'input_parser.dart';
 import 'enum_definitions.dart';
 import 'static_utils.dart';
@@ -15,6 +17,7 @@ class Program {
   /// The main entrypoint for the application.
   static void RunMain(List<String> args) {
     GamesaveTool? tool;
+    SaveSession? session;
     String? saveFileName, outputFileName, dataToApplyTextFile;
     String key = '';
     String coachKey = '';
@@ -58,7 +61,13 @@ class Program {
             outputFileName = args[i].substring(5);
           else if (args[i].endsWith('.txt'))
             dataToApplyTextFile = args[i];
-          else if (args[i].toLowerCase().endsWith('.dat') || args[i].toLowerCase().endsWith('.zip'))
+          else if (args[i].toLowerCase().endsWith('.dat') || 
+                   args[i].toLowerCase().endsWith('.zip') ||
+                   args[i].toLowerCase().endsWith('.max') ||
+                   args[i].toLowerCase().endsWith('.psu') ||
+                   args[i].toLowerCase().endsWith('.ps2') ||
+                   args[i].toLowerCase().endsWith('.bin') ||
+                   args[i].toLowerCase().endsWith('.img'))
             saveFileName = args[i];
           else if (args[i].startsWith('-Key:'))
             key = args[i].substring(5);
@@ -73,13 +82,39 @@ class Program {
     // Load save file
     if (saveFileName != null) {
       try {
-        tool = GamesaveTool();
-        if (!tool.LoadSaveFile(saveFileName)) {
-          Logger.error("File '$saveFileName' does not exist. Make sure you have the correct path to the file specified.");
+        final bytes = File(saveFileName).readAsBytesSync();
+        final lower = saveFileName.toLowerCase();
+
+        if (lower.endsWith('.dat')) {
+          session = SaveSession.fromRawDat(bytes);
+          tool = session.engine;
+        } else if (lower.endsWith('.zip')) {
+          // Standard Xbox ZIP check (NFL2K5 save bundle)
+          session = SaveSession.fromXboxZip(bytes);
+          tool = session.engine;
+        } else if (lower.endsWith('.max') || lower.endsWith('.psu')) {
+          session = SaveSession.fromPs2Save(bytes);
+          tool = session.engine;
+        } else if (lower.endsWith('.ps2')) {
+          session = SaveSession.fromPs2Card(bytes);
+          tool = session.engine;
+        } else if (lower.endsWith('.bin') || lower.endsWith('.img')) {
+          // Could be Xbox MU or PS2 Card. Try Xbox first.
+          try {
+            session = SaveSession.fromXboxMU(bytes);
+            tool = session.engine;
+          } catch (_) {
+            session = SaveSession.fromPs2Card(bytes);
+            tool = session.engine;
+          }
+        }
+
+        if (tool == null) {
+          Logger.error("Failed to load file '$saveFileName'. Unsupported format or corrupted file.");
           return;
         }
       } catch (e) {
-        Logger.error("Error loading file '$saveFileName'. Make sure it is an actual NFL2K5 roster or franchise file.");
+        Logger.error("Error loading file '$saveFileName': $e");
         return;
       }
     }
@@ -116,20 +151,66 @@ class Program {
       else{
         parser.ProcessText( File(dataToApplyTextFile!).readAsStringSync());
       }
+    }
+
+    if (outputFileName != null) {
+      if (tool == null) {
+        stderr.writeln('You must specify a valid save file name in order to save data.');
+        _PrintUsage();
+        return;
+      }
+
       if (autoUpdateDepthChart)
         tool.AutoUpdateDepthChart();
       if (autoUpdatePbp)
         tool.AutoUpdatePBP();
       if (autoUpdatePhoto)
         tool.AutoUpdatePhoto();
+      
       try {
-        tool.SaveFile(outputFileName);
-      } catch (e) {
-        if (e is Exception) {
-          stderr.writeln('Error writing to file: $outputFileName. $e');
+        final lowerOut = outputFileName.toLowerCase();
+        if (lowerOut.endsWith('.dat')) {
+          tool.SaveFile(outputFileName);
+        } else if (lowerOut.endsWith('.zip')) {
+          if (session != null) {
+            File(outputFileName).writeAsBytesSync(session.exportToXboxZip());
+          } else {
+             tool.SaveFile(outputFileName);
+          }
+        } else if (lowerOut.endsWith('.max')) {
+          if (session != null) {
+            File(outputFileName).writeAsBytesSync(session.exportToPs2Max());
+          } else {
+             stderr.writeln('Error: Only PS2 saves can be exported as .max. Use a PS2 source.');
+          }
+        } else if (lowerOut.endsWith('.psu')) {
+          if (session != null) {
+            File(outputFileName).writeAsBytesSync(session.exportToPs2Psu());
+          } else {
+             stderr.writeln('Error: Only PS2 saves can be exported as .psu. Use a PS2 source.');
+          }
+        } else if (lowerOut.endsWith('.ps2')) {
+          if (session != null) {
+            File(outputFileName).writeAsBytesSync(session.injectIntoPs2Card());
+          } else {
+             stderr.writeln('Error: Only PS2 saves can be injected into a .ps2 card. Use a PS2 source.');
+          }
+        } else if (lowerOut.endsWith('.bin') || lowerOut.endsWith('.img')) {
+          if (session != null) {
+            if (session.metadata.sourcePlatform == SavePlatform.xbox) {
+              File(outputFileName).writeAsBytesSync(session.injectIntoXboxMU());
+            } else {
+              File(outputFileName).writeAsBytesSync(session.injectIntoPs2Card());
+            }
+          } else {
+             stderr.writeln('Error: Only full save sessions can be injected into images.');
+          }
         } else {
-          stderr.writeln('Error writing to file: $outputFileName. $e');
+           tool.SaveFile(outputFileName);
         }
+        Logger.log('# Data successfully written to file: $outputFileName.');
+      } catch (e) {
+        stderr.writeln('Error writing to file: $outputFileName. $e');
       }
     }
 
@@ -167,17 +248,21 @@ class Program {
   static void _PrintUsage() {
     Logger.log('''NFL2K5Tool Version $Version
 
-This program can extract data from and import data into a NFL2K5 Save game files.
+This program can extract data from and import data into NFL2K5 Save game files.
 
 Usage:
-    nfl2k5tool_dart <filename.dat>|<filename.zip> <data_to_apply.txt> [options]
+    nfl2k5tool_dart <save_file> [data_to_apply.txt] [options]
+
+Supported Save Formats:
+    Xbox: .dat, .zip (bundle), .bin/.img (Memory Unit)
+    PS2:  .max, .psu, .ps2 (Memory Card), .zip (bundle)
 
 Examples:
     [Print all player attributes]
     nfl2k5tool_dart MyRoster.zip -ab -app
 
-    [Print only specified player attributes]
-    nfl2k5tool_dart MyRoster.zip -ab  -Key:Position,fname,lname,Photo,Skin
+    [Convert Xbox roster to PS2 Max format]
+    nfl2k5tool_dart MyRoster.dat -out:MyRoster.max
 
     [Reads in 'MyRoster.zip', applies the data from input.txt, saves to MyRoster_mod.zip]
     nfl2k5tool_dart MyRoster.zip input.txt -out:MyRoster_mod.zip
@@ -186,7 +271,7 @@ Examples:
     nfl2k5tool_dart MyRoster.zip input.txt -dc -fa -ab -app
 
 
-The default behavior when called with a .dat or .zip filename and no options is to print player information from the given NFL2K5 save file.
+The default behavior when called with a supported save file and no options is to print player information from the given NFL2K5 save file.
 
 When called with a NFL2K5 save file and a <data_to_apply.txt> file, the behavior is that it will modify the NFL2K5 save file with the data contained in the data file.
 
