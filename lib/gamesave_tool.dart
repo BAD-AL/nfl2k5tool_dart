@@ -937,20 +937,15 @@ class GamesaveTool {
     if (isReadOnly) {
       StaticUtils.AddError("File: '$fileName' is Read only");
     } else if (fileName.toLowerCase().endsWith('.dat')) {
-      if (f.existsSync()) f.deleteSync();
-      f.writeAsBytesSync(GameSaveData!);
-
-      int index = fileName.lastIndexOf('\\') + 1;
-      if (index <= 0) index = fileName.lastIndexOf('/') + 1;
-      if (index > 0) {
-        String extraFile = fileName.substring(0, index) + 'EXTRA';
-        if (File(extraFile).existsSync()) {
-          String tmpFile = '${Directory.systemTemp.path}/nfl2k5_${DateTime.now().millisecondsSinceEpoch}.tmp';
-          StaticUtils.SignNfl2K5Save(tmpFile, GameSaveData!);
-          File(tmpFile).copySync(extraFile);
-          File(tmpFile).deleteSync();
-        }
+      if (f.existsSync()) {
+        f.deleteSync();
       }
+      f.writeAsBytesSync(GameSaveData!);
+      String extraFile = "${f.parent.path}/EXTRA";
+      String tmpFile = '${Directory.systemTemp.path}/nfl2k5_${DateTime.now().millisecondsSinceEpoch}.tmp';
+      StaticUtils.SignNfl2K5SaveForXbox(tmpFile, GameSaveData!);
+      File(tmpFile).copySync(extraFile);
+      File(tmpFile).deleteSync();
       stderr.writeln('# Data successfully written to file: $fileName.');
     } else if (fileName.toLowerCase().endsWith('.zip')) {
       if (mZipFile.isNotEmpty && mZipFile != fileName)
@@ -961,7 +956,7 @@ class GamesaveTool {
       File(tmpFile).deleteSync();
 
       tmpFile = '${Directory.systemTemp.path}/nfl2k5_${DateTime.now().millisecondsSinceEpoch}.tmp';
-      StaticUtils.SignNfl2K5Save(tmpFile, GameSaveData!);
+      StaticUtils.SignNfl2K5SaveForXbox(tmpFile, GameSaveData!);
       StaticUtils.ReplaceFileInArchive(fileName, null, 'EXTRA', tmpFile);
       File(tmpFile).deleteSync();
     } else {
@@ -2466,63 +2461,6 @@ class GamesaveTool {
       }
     }
     return false;
-  }
-
-  static String sPhotoHashMapPath_2022 = 'PlayerData/photo_map_new_emu_2022.csv';
-
-  String? LookupPhotoHash_2022(int playerIndex) {
-    String photo_str = GetAttribute(playerIndex, PlayerOffsets.Photo);
-    int photo_number = int.parse(photo_str);
-    if (PhotoHashMap_2022.containsKey(photo_number))
-      return PhotoHashMap_2022[photo_number];
-    return null;
-  }
-
-  Map<int, String>? mPhotoHashMap_2022;
-  Map<int, String> get PhotoHashMap_2022 {
-    if (mPhotoHashMap_2022 == null) {
-      File f = File(sPhotoHashMapPath_2022);
-      if (f.existsSync()) {
-        List<String> lines = f.readAsStringSync().split('\n');
-        mPhotoHashMap_2022 = {};
-        for (String line in lines) {
-          if (!line.startsWith('#')) {
-            List<String> parts = line.split(',');
-            if (parts.length == 2 && line.length > 4) {
-              int key = int.tryParse(parts[0]) ?? -1;
-              if (key >= 0)
-                mPhotoHashMap_2022![key] = parts[1];
-            }
-          }
-        }
-      } else {
-        throw FileSystemException("Path '$sPhotoHashMapPath_2022' not found!");
-      }
-    }
-    return mPhotoHashMap_2022!;
-  }
-
-  String GenPlayerPhotoPCSX2_data_2022_BatchFile() {
-    StringBuffer sb = StringBuffer();
-    String path = '';
-    String? hash;
-    sb.write(':: Photo map located at:\r\n');
-    sb.write(':: $sPhotoHashMapPath_2022\r\n');
-    sb.write('if not exist replacements\\portraits\\ (\r\n');
-    sb.write('    md replacements \r\n');
-    sb.write('    md replacements\\portraits\\ \r\n');
-    sb.write(')\r\n');
-
-    for (int i = 0; i < mMaxPlayers; i++) {
-      hash = LookupPhotoHash_2022(i);
-      if (hash != null) {
-        path = 'copy /Y madden_photos\\${GetPlayerPosition(i)}_${GetPlayerFirstName(i)}${GetPlayerLastName(i)}.png replacements\\portraits\\$hash.png\r\n';
-        sb.write(path);
-      } else {
-        sb.write("::  Photo '${GetAttribute(i, PlayerOffsets.Photo)}' is not mapped; '${GetPlayerPosition(i)} ${GetPlayerFirstName(i)} ${GetPlayerLastName(i)}'\r\n");
-      }
-    }
-    return sb.toString();
   }
 
   String GetPlayerPhotoPCSX2Yaml() {

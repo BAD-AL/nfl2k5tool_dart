@@ -7,22 +7,12 @@ import 'dart:typed_data';
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 
-import 'enf_photo_index.dart';
-import 'enf_name_index.dart';
-
 /// Static utility functions.
 class StaticUtils {
   StaticUtils._(); // prevent instantiation
 
-  /// Gets an embedded text file by name (ENFPhotoIndex.txt or ENFNameIndex.txt).
-  static String? GetEmbeddedTextFile(String file) {
-    String lowerFile = file.toLowerCase();
-    if (lowerFile.endsWith('enfphotoindex.txt'))
-      return kEnfPhotoIndexContent;
-    if (lowerFile.endsWith('enfnameindex.txt'))
-      return kEnfNameIndexContent;
-    AddError('Error getting file $file');
-    return null;
+  static void WriteError(String err){
+    stderr.writeln(err);
   }
 
   // #region Error functionality
@@ -213,7 +203,7 @@ class StaticUtils {
 
   /// Signs the NFL2K5 xbox save file.
   /// The EXTRA file is signed/hashed with the SAVEGAME.DAT data and the 2K5 key.
-  static void SignNfl2K5Save(String fileToSign, Uint8List dataToHash) {
+  static void SignNfl2K5SaveForXbox(String fileToSign, Uint8List dataToHash) {
     _SignFile(_mNFL2K5Key, fileToSign, dataToHash);
   }
 

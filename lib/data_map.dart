@@ -1,52 +1,33 @@
 // Translated from DataMap.cs
 // ignore_for_file: non_constant_identifier_names
 
-import 'dart:io';
-import 'static_utils.dart';
 import 'enf_photo_index.dart';
 import 'enf_name_index.dart';
 
 class DataMap {
   static Map<String, String>? sPhotoMap;
   static Map<String, String>? sPBPMap;
+  //static const String cPhotoMapPath = './PlayerData/ENFPhotoIndex.txt'; kEnfPhotoIndexContent
+  //static const String cPBPMapPath = './PlayerData/ENFNameIndex.txt'; kEnfNameIndexContent
 
-  static const String cPhotoMapPath = './PlayerData/ENFPhotoIndex.txt';
-  static const String cPBPMapPath = './PlayerData/ENFNameIndex.txt';
-
-  static void EnsureFiles() {
-    if (!File(cPhotoMapPath).existsSync()) {
-      if (!Directory('./PlayerData/').existsSync())
-        Directory('./PlayerData/').createSync(recursive: true);
-      stderr.writeln("Couldn't find 'ENFPhotoIndex.txt', using embedded file...");
-      File(cPhotoMapPath).writeAsStringSync(kEnfPhotoIndexContent);
-    }
-    if (!File(cPBPMapPath).existsSync()) {
-      if (!Directory('./PlayerData/').existsSync())
-        Directory('./PlayerData/').createSync(recursive: true);
-      stderr.writeln("Couldn't find 'ENFNameIndex.txt', using embedded file...");
-      File(cPBPMapPath).writeAsStringSync(kEnfNameIndexContent);
-    }
-  }
 
   static Map<String, String> get PhotoMap {
     if (sPhotoMap == null) {
-      EnsureFiles();
-      sPhotoMap = _ReadIntoMap(cPhotoMapPath, false);
+      sPhotoMap = _ReadIntoMap(kEnfPhotoIndexContent, false);
     }
     return sPhotoMap!;
   }
 
   static Map<String, String> get PBPMap {
     if (sPBPMap == null) {
-      EnsureFiles();
-      sPBPMap = _ReadIntoMap(cPBPMapPath, false);
+      sPBPMap = _ReadIntoMap(kEnfNameIndexContent, false);
     }
     return sPBPMap!;
   }
 
   /// Returns a Map of the file contents.
   /// [lookupByNumber] true to lookup by number, false to lookup by name
-  static Map<String, String> _ReadIntoMap(String fileName, bool lookupByNumber) {
+  static Map<String, String> _ReadIntoMap(String content, bool lookupByNumber) {
     Map<String, String> retVal;
     const String sep = '=';
     int key = 0;
@@ -55,8 +36,8 @@ class DataMap {
       key = 1;
       value = 0;
     }
-    if (File(cPhotoMapPath).existsSync()) {
-      List<String> contents = File(fileName).readAsLinesSync();
+    if ( content.isNotEmpty ) {
+      List<String> contents = content.replaceAll("\r\n", "\n").split('\n');
       retVal = {};
       for (int i = 0; i < contents.length; i++) {
         String line = contents[i];
@@ -77,8 +58,7 @@ class DataMap {
 
   static Map<String, String> get ReversePhotoMap {
     if (sReversePhotoMap == null) {
-      EnsureFiles();
-      sReversePhotoMap = _ReadIntoMap(cPhotoMapPath, true);
+      sReversePhotoMap = _ReadIntoMap(kEnfPhotoIndexContent, true);
     }
     return sReversePhotoMap!;
   }
@@ -100,8 +80,7 @@ class DataMap {
 
   static Map<String, String> get ReversePBPMap {
     if (sReversePBPMap == null) {
-      EnsureFiles();
-      sReversePBPMap = _ReadIntoMap(cPBPMapPath, true);
+      sReversePBPMap = _ReadIntoMap(kEnfNameIndexContent, true);
     }
     return sReversePBPMap!;
   }

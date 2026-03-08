@@ -96,10 +96,24 @@ class Program {
         _PrintUsage();
         return;
       }
-      if (readFromStdIn)
-        parser.ReadFromStdin();
-      else
-        parser.ProcessFile(dataToApplyTextFile!);
+      if (readFromStdIn){
+        String? line = '';
+        int lineNumber = 0;
+        stderr.writeln('Reading from standard in...');
+        try {
+          while ((line = stdin.readLineSync()) != null) {
+            lineNumber++;
+            parser.ProcessLine(line!);
+          }
+          parser.ApplySchedule();
+        } catch (e, stack) {
+          StaticUtils.AddError(
+            "Error Processing line $lineNumber:'$line'.\n$e\n$stack");
+        }
+      }
+      else{
+        parser.ProcessText( File(dataToApplyTextFile!).readAsStringSync());
+      }
       if (autoUpdateDepthChart)
         tool.AutoUpdateDepthChart();
       if (autoUpdatePbp)

@@ -1,7 +1,6 @@
 // Translated from InputParser.cs
 // ignore_for_file: non_constant_identifier_names
 
-import 'dart:io';
 import 'enum_definitions.dart';
 import 'static_utils.dart';
 import 'gamesave_tool.dart';
@@ -110,32 +109,6 @@ class InputParser {
     return null;
   }
 
-  /// Process the text in the given file, applying it to the gamesave data.
-  void ProcessFile(String fileName) {
-    try {
-      String contents = File(fileName).readAsStringSync();
-      ProcessText(contents);
-    } catch (e) {
-      StaticUtils.AddError("Error processing file '$fileName'. $e");
-    }
-  }
-
-  void ReadFromStdin() {
-    String? line = '';
-    int lineNumber = 0;
-    stderr.writeln('Reading from standard in...');
-    try {
-      while ((line = stdin.readLineSync()) != null) {
-        lineNumber++;
-        ProcessLine(line!);
-      }
-      ApplySchedule();
-    } catch (e, stack) {
-      StaticUtils.AddError(
-        "Error Processing line $lineNumber:'$line'.\n$e\n$stack");
-    }
-  }
-
   void ProcessText(String text) {
     sDelim = _CharCount(text, ';') > _CharCount(text, ',') ? ';' : ',';
     List<String> lines = text.split(RegExp(r'[\n\r]'));
@@ -159,7 +132,7 @@ class InputParser {
       sb.write('\n');
       sb.write(stack.toString());
       sb.write('\n\nOperation aborted at this point. Data not applied.');
-      stderr.writeln(sb.toString());
+      StaticUtils.WriteError(sb.toString());
     }
   }
 

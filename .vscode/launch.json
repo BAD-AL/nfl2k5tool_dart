@@ -1,0 +1,33 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: Schedule Tests",
+            "type": "node",
+            "request": "launch",
+            "runtimeArgs": ["--test"],
+            "args": ["${workspaceFolder}/schedule_bin/tests/schedule.test.mjs"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen"
+        },
+        {
+            "name": "Debug: Schedule Tests (filter by name)",
+            "type": "node",
+            "request": "launch",
+            "runtimeArgs": ["--test", "--test-name-pattern=${input:testPattern}"],
+            "args": ["${workspaceFolder}/schedule_bin/tests/schedule.test.mjs"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testPattern",
+            "type": "promptString",
+            "description": "Test name pattern to run (substring or regex)",
+            "default": "round-trip"
+        }
+    ]
+}
