@@ -5,7 +5,7 @@ import 'enum_definitions.dart';
 import 'static_utils.dart';
 import 'gamesave_tool.dart';
 
-enum ParsingStates { PlayerModification, PlayerLookupAndApply, PlayerLookup, Schedule }
+enum ParsingStates { PlayerModification, PlayerLookupAndApply, PlayerLookupAndVerify, PlayerLookup, Schedule }
 
 /// Class used to help keep track of number of players being input.
 class InputParserTeamTracker {
@@ -163,6 +163,9 @@ class InputParser {
     } else if (line.toLowerCase().contains('lookupandmodify')) {
       print('LookupAndModifyMode');
       mCurrentState = ParsingStates.PlayerLookupAndApply;
+    } else if (line.toLowerCase().contains('lookupandverify')) {
+      print('LookupAndVerifyMode');
+      mCurrentState = ParsingStates.PlayerLookupAndVerify;
     } else if ((mTeamMatch = mTeamRegex.firstMatch(line)) != null) {
       mCurrentState = ParsingStates.PlayerModification;
       String team = mTeamMatch!.group(1).toString();
@@ -192,6 +195,10 @@ class InputParser {
     } else if (line.startsWith('LookupPlayer')) {
       mCurrentState = ParsingStates.PlayerLookup;
       mLookupedPlayers = StringBuffer();
+    } else if (line.startsWith('PlayerControlled')) {
+      Tool.setPlayerControlledTeams(line);
+    } else if (line.startsWith('AutoFixSkinFromPhoto')) {
+      Tool.autoFixSkinFromPhoto();
     } else if (line.startsWith('ApplyFormula')) {
       _ApplyFormula(line);
     } else {
@@ -208,6 +215,9 @@ class InputParser {
           break;
         case ParsingStates.PlayerLookupAndApply:
           retVal = _LookupPlayerAndApply(line);
+          break;
+        case ParsingStates.PlayerLookupAndVerify:
+          _lookupPlayerAndVerify(line);
           break;
       }
     }
@@ -286,6 +296,37 @@ class InputParser {
       StaticUtils.AddError("In 'LookupAndModify' mode, you must specify fname and lname in the 'Key' for proper lookup: $line");
     }
     return retVal;
+  }
+
+  /// Looks up a player by name and verifies the [line] is contained in their
+  /// stored data. Logs an error if the data doesn't match.
+  void _lookupPlayerAndVerify(String line) {
+    List<String> attributes = ParsePlayerLine(line)!;
+
+    int firstNameIndex = -1, lastNameIndex = -1, positionIndex = -1;
+    for (int i = 0; i < Tool.Order!.length; i++) {
+      if (Tool.Order![i] == -1) firstNameIndex = i;
+      else if (Tool.Order![i] == -2) lastNameIndex = i;
+      else if (Tool.Order![i] == PlayerOffsets.Position.value) positionIndex = i;
+      if (firstNameIndex > -1 && lastNameIndex > -1 && positionIndex > -1) break;
+    }
+    if (firstNameIndex > -1 && lastNameIndex > -1) {
+      String? pos;
+      if (positionIndex > -1) pos = attributes[positionIndex];
+      String firstName = attributes[firstNameIndex];
+      String lastName  = attributes[lastNameIndex];
+
+      List<int> playersToVerify = Tool.FindPlayer(pos, firstName, lastName);
+      if (playersToVerify.isNotEmpty) {
+        String playerData = Tool.GetPlayerData(playersToVerify[0], true, true);
+        if (!playerData.toLowerCase().contains(line.toLowerCase())) {
+          StaticUtils.AddError('Fail! LookupAndVerify: $line != $playerData');
+        }
+      }
+    } else {
+      StaticUtils.AddError(
+          "In 'LookupAndVerify' mode, you must specify fname and lname in the 'Key' for proper lookup: $line");
+    }
   }
 
   /// Looks up a player and returns their data.

@@ -49,6 +49,14 @@ class GamesaveTool {
 
   void loadSaveData(Uint8List data) {
     GameSaveData = data;
+    setupForSaveType();
+    checkNamePointers();
+  }
+
+  /// Detects save type from header magic bytes and calls the appropriate
+  /// initializer. Can be called directly when GameSaveData is assigned
+  /// externally (e.g. in AutoFixSkinFromPhoto).
+  void setupForSaveType() {
     mColleges.clear();
     if (GameSaveData![0] == 0x52 && GameSaveData![1] == 0x4F &&
         GameSaveData![2] == 0x53 && GameSaveData![3] == 0x54) {
@@ -56,7 +64,6 @@ class GamesaveTool {
     } else {
       InitializeForFranchise();
     }
-    checkNamePointers();
   }
 
   GamesaveTool() {
@@ -2363,6 +2370,130 @@ class GamesaveTool {
     'Turtleneck': Turtleneck.values.map((e) => e.name).toList(),
     'PowerRunStyle': PowerRunStyle.values.map((e) => e.name).toList(),
   };
+
+  // ── Team player-control (Franchise mode only) ──────────────────────────
+
+  static const int _teamControlStartLoc = 0x913CC;
+
+  /// Optional base roster data used by [autoFixSkinFromPhoto].
+  /// Set this before calling that method (e.g. via gamesave_tool_io.dart).
+  Uint8List? baseRosterData;
+
+  /// Returns true if the team is set to user-controlled in the franchise save.
+  bool isTeamPlayerControlled(String team) {
+    int teamIndex = GetTeamIndex(team);
+    int location = _teamControlStartLoc + teamIndex * 4;
+    return GameSaveData![location] == 1;
+  }
+
+  /// Sets whether the given team is user-controlled (true) or CPU (false).
+  void setTeamPlayerControlled(String team, bool userControlled) {
+    int teamIndex = GetTeamIndex(team);
+    int location = _teamControlStartLoc + teamIndex * 4;
+    GameSaveData![location] = userControlled ? 1 : 0;
+  }
+
+  /// Sets all 32 teams to user-controlled.
+  void setAllTeamsPlayerControlled() {
+    for (int i = 0; i < 32; i++)
+      setTeamPlayerControlled(sTeamsDataOrder[i], true);
+  }
+
+  /// Parses a line like `PlayerControlled=[ARI,DAL,...]` or
+  /// `PlayerControlled=All` and applies the settings.
+  void setPlayerControlledTeams(String line) {
+    int index1 = line.indexOf('[');
+    int index2 = line.indexOf(']');
+    int count = 0;
+    if (line.toLowerCase().contains('all')) {
+      setAllTeamsPlayerControlled();
+      return;
+    }
+    if (index1 > -1 && index2 > index1) {
+      for (int i = 0; i < 32; i++) {
+        String team = sTeamsDataOrder[i];
+        if (!line.toLowerCase().contains(team.toLowerCase())) {
+          setTeamPlayerControlled(team, false);
+        } else {
+          setTeamPlayerControlled(team, true);
+          count++;
+        }
+      }
+    }
+    Logger.log('SetTeamsPlayerControlled: $count teams');
+  }
+
+  /// Returns a formatted `PlayerControlled=[...]` line for all currently
+  /// user-controlled teams (franchise only).
+  String getPlayerControlledTeams() {
+    StringBuffer sb = StringBuffer();
+    sb.write('PlayerControlled=[');
+    int count = 0;
+    if (mSaveType == SaveType.Franchise) {
+      for (int i = 0; i < 32; i++) {
+        String team = sTeamsDataOrder[i];
+        if (isTeamPlayerControlled(team)) {
+          count++;
+          sb.write('$team,');
+        }
+      }
+    }
+    sb.write(']\n');
+    sb.write('# PlayerControlledTeams=$count\n');
+    if (mSaveType == SaveType.Roster)
+      sb.write('#PlayerControlledTeams not applicable to Type = Roster');
+    return sb.toString();
+  }
+
+  // ── Photo / skin auto-fix ───────────────────────────────────────────────
+
+  /// Builds a photo→skin/face map from [baseRosterData] (or the stored
+  /// [baseRosterData] field if [baseRosterData] arg is null) and updates any
+  /// player in the current save whose skin or face doesn't match the map.
+  void autoFixSkinFromPhoto([Uint8List? baseRosterOverride]) {
+    Uint8List? baseData = baseRosterOverride ?? baseRosterData;
+    if (baseData == null) {
+      Logger.log('autoFixSkinFromPhoto: no base roster data provided; skipping.');
+      return;
+    }
+    Logger.log('AutoFixSkinFromPhoto');
+    const int playerLimit = 1928;
+    GamesaveTool baseTool = GamesaveTool();
+    baseTool.GameSaveData = baseData;
+    baseTool.setupForSaveType();
+
+    Map<String, String> photoSkinMap = {};
+    Map<String, String> photoFaceMap = {};
+    for (int player = 0; player < playerLimit; player++) {
+      String photo = baseTool.GetPlayerField(player, 'Photo');
+      String face  = baseTool.GetPlayerField(player, 'Face');
+      String skin  = baseTool.GetPlayerField(player, 'Skin');
+      if (photo != '0004' && !photoSkinMap.containsKey(photo)) {
+        photoSkinMap[photo] = skin;
+        photoFaceMap[photo] = face;
+      }
+    }
+
+    for (int player = 0; player < playerLimit; player++) {
+      String photo = GetPlayerField(player, 'Photo');
+      String face  = GetPlayerField(player, 'Face');
+      String skin  = GetPlayerField(player, 'Skin');
+      if (photo != '0004' && photoSkinMap.containsKey(photo)) {
+        if (face != photoFaceMap[photo] || skin != photoSkinMap[photo]) {
+          try {
+            SetAttribute(player, PlayerOffsets.Face, photoFaceMap[photo]!);
+            SetPlayerField(player, 'Skin', photoSkinMap[photo]!);
+            Logger.log('Updated Player ${GetPlayerPosition(player)} '
+                '${GetPlayerName(player, ' ')} Photo=$photo;-> '
+                '${photoSkinMap[photo]} ${photoFaceMap[photo]}');
+          } catch (e) {
+            Logger.log('autoFixSkinFromPhoto: skipping player $player '
+                '(${GetPlayerName(player, ' ')}) – invalid value: $e');
+          }
+        }
+      }
+    }
+  }
 
   bool _EvaluateExpression(String expr) {
     expr = expr.trim();

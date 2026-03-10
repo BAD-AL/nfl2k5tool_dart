@@ -77,4 +77,21 @@ extension GamesaveToolIo on GamesaveTool {
       StaticUtils.AddError('Error! Unsupported file extension: "$fileName". Use .dat or .zip for raw Xbox saves, or ensure you are using a full SaveSession for PS2/MU formats.');
     }
   }
+
+  /// Loads a base roster SAVEGAME.DAT (or .zip) into [baseRosterData] so
+  /// that [autoFixSkinFromPhoto] can use it.
+  bool loadBaseRoster(String path) {
+    Uint8List? data;
+    if (path.toLowerCase().endsWith('.zip')) {
+      data = StaticUtilsIo.extractFileFromZip(path, null, 'SAVEGAME.DAT');
+    } else {
+      File f = File(path);
+      if (f.existsSync()) data = f.readAsBytesSync();
+    }
+    if (data != null) {
+      baseRosterData = data;
+      return true;
+    }
+    return false;
+  }
 }

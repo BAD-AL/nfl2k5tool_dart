@@ -467,6 +467,223 @@ void main() {
     });
   });
 
+  // T-8 — setupForSaveType() initialises correctly when GameSaveData is
+  //        assigned directly (rather than via loadSaveData / LoadSaveFile).
+  //
+  // The C# refactor extracted this logic so AutoFixSkinFromPhoto could create
+  // a second GamesaveTool, assign raw bytes, and then call setupForSaveType().
+  // This test verifies that the Dart equivalent works the same way.
+  group('T-8 – setupForSaveType() with direct GameSaveData assignment', () {
+    test('roster magic bytes → SaveType.Roster', () {
+      final bytes = File(testFile(_yearRosters['BaseRoster']!)).readAsBytesSync();
+      final tool = GamesaveTool();
+      tool.GameSaveData = bytes;
+      tool.setupForSaveType();
+      expect(tool.saveType, equals(SaveType.Roster));
+    });
+
+    test('franchise magic bytes → SaveType.Franchise', () {
+      // Extract raw bytes from the franchise zip the same way LoadSaveFile does.
+      final zip = File(testFile('Base2004Fran_Orig.zip')).readAsBytesSync();
+      final bytes = StaticUtils.ExtractFileFromZipData(zip, null, 'SAVEGAME.DAT');
+      expect(bytes, isNotNull);
+      final tool = GamesaveTool();
+      tool.GameSaveData = bytes;
+      tool.setupForSaveType();
+      expect(tool.saveType, equals(SaveType.Franchise));
+    });
+
+    test('mPlayerStart is sane after direct assignment + setupForSaveType', () {
+      final bytes = File(testFile(_yearRosters['BaseRoster']!)).readAsBytesSync();
+      final tool = GamesaveTool();
+      tool.GameSaveData = bytes;
+      tool.setupForSaveType();
+      expect(tool.mPlayerStart, equals(0xAFA8));
+    });
+  });
+
+  // T-9 — Team player-control methods (franchise mode only)
+  //
+  // These methods read/write a byte table at 0x913CC in franchise saves.
+  // Tests operate on a fresh in-memory copy so they don't interfere with
+  // each other or with other groups.
+  group('T-9 – team player-control (franchise save)', () {
+    late GamesaveTool tool;
+
+    setUpAll(() {
+      tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+    });
+
+    test('setTeamPlayerControlled / isTeamPlayerControlled round-trip', () {
+      // Capture original value, then toggle, then restore.
+      final original = tool.isTeamPlayerControlled('49ers');
+      tool.setTeamPlayerControlled('49ers', !original);
+      expect(tool.isTeamPlayerControlled('49ers'), equals(!original));
+      tool.setTeamPlayerControlled('49ers', original);
+      expect(tool.isTeamPlayerControlled('49ers'), equals(original));
+    });
+
+    test('setAllTeamsPlayerControlled sets all 32 teams to user-controlled', () {
+      tool.setAllTeamsPlayerControlled();
+      for (int i = 0; i < 32; i++) {
+        expect(tool.isTeamPlayerControlled(GamesaveTool.sTeamsDataOrder[i]),
+            isTrue,
+            reason: '${GamesaveTool.sTeamsDataOrder[i]} should be user-controlled');
+      }
+    });
+
+    test('setPlayerControlledTeams with team list controls only listed teams', () {
+      // Set all to CPU first, then re-enable two.
+      for (int i = 0; i < 32; i++)
+        tool.setTeamPlayerControlled(GamesaveTool.sTeamsDataOrder[i], false);
+
+      tool.setPlayerControlledTeams('PlayerControlled=[49ers,Bears,]');
+
+      expect(tool.isTeamPlayerControlled('49ers'), isTrue);
+      expect(tool.isTeamPlayerControlled('Bears'), isTrue);
+      expect(tool.isTeamPlayerControlled('Bengals'), isFalse);
+    });
+
+    test('setPlayerControlledTeams with All sets every team', () {
+      // First CPU-out all teams.
+      for (int i = 0; i < 32; i++)
+        tool.setTeamPlayerControlled(GamesaveTool.sTeamsDataOrder[i], false);
+
+      tool.setPlayerControlledTeams('PlayerControlled=All');
+
+      for (int i = 0; i < 32; i++) {
+        expect(tool.isTeamPlayerControlled(GamesaveTool.sTeamsDataOrder[i]),
+            isTrue);
+      }
+    });
+
+    test('getPlayerControlledTeams output contains controlled team names', () {
+      for (int i = 0; i < 32; i++)
+        tool.setTeamPlayerControlled(GamesaveTool.sTeamsDataOrder[i], false);
+      tool.setTeamPlayerControlled('49ers', true);
+      tool.setTeamPlayerControlled('Cowboys', true);
+
+      final output = tool.getPlayerControlledTeams();
+      expect(output, contains('PlayerControlled=['));
+      expect(output, contains('49ers'));
+      expect(output, contains('Cowboys'));
+      expect(output, contains('PlayerControlledTeams=2'));
+    });
+
+    test('getPlayerControlledTeams includes roster note when save type is Roster', () {
+      // Use a separate roster-mode tool to check the type annotation.
+      final rosterTool = GamesaveTool();
+      rosterTool.LoadSaveFile(testFile('Week_6_2024.zip'));
+      final output = rosterTool.getPlayerControlledTeams();
+      expect(output, contains('not applicable to Type = Roster'));
+    });
+
+    test('SAVEGAME14uc.DAT has exactly 14 user-controlled teams', () {
+      final tool14 = GamesaveTool();
+      final ok = tool14.LoadSaveFile(testFile('SAVEGAME14uc.DAT'));
+      expect(ok, isTrue, reason: 'SAVEGAME14uc.DAT must load successfully');
+      expect(tool14.saveType, equals(SaveType.Franchise),
+          reason: 'Player-control table only exists in Franchise saves');
+      final output = tool14.getPlayerControlledTeams();
+      expect(output, contains('PlayerControlledTeams=14'));
+    });
+  });
+
+  // T-10 — autoFixSkinFromPhoto()
+  //
+  // Verifies the null-guard path (no baseRosterData → silent skip) and the
+  // happy path (valid base data → runs without throwing, makes no spurious
+  // changes when base and current are identical).
+  group('T-10 – autoFixSkinFromPhoto', () {
+    test('no-ops gracefully when baseRosterData is null', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('Week_6_2024.zip'));
+      // Must not throw; baseRosterData defaults to null.
+      expect(() => tool.autoFixSkinFromPhoto(), returnsNormally);
+    });
+
+    test('runs without throwing when given valid base roster bytes', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('Week_6_2024.zip'));
+
+      final baseBytes =
+          File(testFile(_yearRosters['BaseRoster']!)).readAsBytesSync();
+      expect(() => tool.autoFixSkinFromPhoto(baseBytes), returnsNormally);
+    });
+
+    test('identity case: same file as base and current leaves data unchanged', () {
+      // When the base and current file are identical every photo→skin/face
+      // mapping already matches, so no bytes should be modified.
+      final bytes =
+          File(testFile(_yearRosters['BaseRoster']!)).readAsBytesSync();
+
+      final tool = GamesaveTool();
+      tool.loadSaveData(bytes);
+      final before = tool.GameSaveData!.toList();
+
+      tool.autoFixSkinFromPhoto(bytes);
+      expect(tool.GameSaveData!.toList(), equals(before));
+    });
+  });
+
+  // T-11 — InputParser PlayerLookupAndVerify mode
+  //
+  // _lookupPlayerAndVerify() finds a player by name and checks that the input
+  // line is a substring of GetPlayerData output.  If not, it adds to
+  // StaticUtils.Errors.  Tests use a key of "FName,LName,Speed" so that
+  // FindPlayer searches without a position filter (no Position column) and the
+  // Speed field gives us a controlled mismatch value.
+  group('T-11 – InputParser PlayerLookupAndVerify mode', () {
+    late GamesaveTool tool;
+    late String player0First;
+    late String player0Last;
+    late String player0Speed; // actual speed from the save file
+
+    setUpAll(() {
+      tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('Week_6_2024.zip'));
+      // Key with no Position column so FindPlayer gets pos=null and searches
+      // all positions — guarantees the name lookup succeeds.
+      // GetAttributeValue expects lowercase 'fname'/'lname'; enum names are
+      // case-sensitive for other attributes (e.g. 'Speed' not 'speed').
+      tool.SetKey('fname,lname,Speed');
+      player0First = tool.GetPlayerFirstName(0);
+      player0Last  = tool.GetPlayerLastName(0);
+      // Extract speed from GetPlayerData output: "FName,LName,Speed,"
+      final raw = tool.GetPlayerData(0, true, true); // e.g. "Brock,Purdy,78,"
+      final parts = raw.split(',');
+      player0Speed = parts.length >= 3 ? parts[2] : '50';
+    });
+
+    setUp(() => StaticUtils.Errors.clear());
+
+    test('matching player line adds no error', () {
+      // Line is exactly what GetPlayerData produces (minus trailing comma).
+      final line = '$player0First,$player0Last,$player0Speed';
+      final parser = InputParser(tool);
+      parser.ProcessLine('LookupAndVerify');
+      parser.ProcessLine(line);
+      expect(StaticUtils.Errors, isEmpty,
+          reason: 'Exact attribute values should verify cleanly');
+    });
+
+    test('mismatched Speed value adds a verify error', () {
+      // Build a line with correct name but a speed that cannot match.
+      // Speed is stored as 0–99; any value outside 0–99 or clearly different
+      // from the real value will not appear in GetPlayerData output.
+      final actualSpeed = int.tryParse(player0Speed) ?? 50;
+      final wrongSpeed  = (actualSpeed + 1) % 100; // guaranteed ≠ actual
+      final line = '$player0First,$player0Last,$wrongSpeed';
+      final parser = InputParser(tool);
+      parser.ProcessLine('LookupAndVerify');
+      parser.ProcessLine(line);
+      expect(StaticUtils.Errors, isNotEmpty,
+          reason: 'Wrong Speed value should trigger a verify error');
+      expect(StaticUtils.Errors.first, contains('Fail! LookupAndVerify'));
+    });
+  });
+
   // T-7 — checkNamePointers() detects shared string-table entries
   //
   // Flying Finn's editor saves space by pointing multiple player fname/lname
