@@ -260,4 +260,13 @@ enum CoachOffsets {
   final int value;
 }
 
+enum TeamDataOffsets {
+  Nickname, // S3a[0] e.g. "49ers"
+  Abbrev,   // S3a[1] e.g. "SF"
+  Stadium,  // special: reads S1a via byte index; writes via SetStadiumIndex
+            // formatted with [brackets] in text files, e.g. "[San Francisco Park]"
+  City,     // S3a[3] e.g. "San Francisco"
+  AbbrAlt,  // S3a[4] e.g. "SF" (repeated for a second display context)
+}
+
 enum FormulaMode { Normal, Add, Percent }

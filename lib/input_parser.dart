@@ -190,6 +190,10 @@ class InputParser {
       Tool.AutoUpdatePBP();
     } else if (line == 'AutoUpdatePhoto') {
       Tool.AutoUpdatePhoto();
+    } else if (line.toLowerCase().startsWith('teamdatakey=')) {
+      Tool.TeamKey = line.substring(12);
+    } else if (line.toLowerCase().startsWith('teamdata,')) {
+      _SetTeamDataLine(line);
     } else if (line.toLowerCase().startsWith('coach,')) {
       SetCoachData(line);
     } else if (line.startsWith('LookupPlayer')) {
@@ -386,6 +390,30 @@ class InputParser {
     } catch (e) {
       StaticUtils.AddError(
           "Error setting data for line:\r\n$line\r\n\r\nPerhaps check '${current.name}' attribute.");
+    }
+  }
+
+  void _SetTeamDataLine(String line) {
+    List<String> keyParts = Tool.TeamKey.split(',');
+    List<String> parts    = line.split(',');
+    if (parts.length < 2) return;
+    int teamIndex = Tool.GetTeamIndex(parts[1]);
+    if (teamIndex < 0) {
+      StaticUtils.AddError("TeamData: unknown team '${parts[1]}' in line: $line");
+      return;
+    }
+    for (int i = 2; i < keyParts.length && i < parts.length; i++) {
+      String lp = keyParts[i].toLowerCase();
+      if (lp == 'teamdata' || lp == 'team') continue;
+      try {
+        TeamDataOffsets attr = TeamDataOffsets.values
+            .firstWhere((e) => e.name.toLowerCase() == lp);
+        // Strip brackets for Stadium (matching coach Body convention).
+        String val = parts[i].replaceAll('[', '').replaceAll(']', '');
+        Tool.SetTeamString(teamIndex, attr, val);
+      } catch (_) {
+        // unknown key part — skip silently
+      }
     }
   }
 

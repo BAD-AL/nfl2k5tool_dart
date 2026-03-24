@@ -684,6 +684,170 @@ void main() {
     });
   });
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // T-C: Coach non-string data (franchise save) — CoachTestPlan.md
+  // ───────────────────────────────────────────────────────────────────────────
+
+  // T-C1 — GetCoachDataAll smoke test (read-only)
+  //
+  // Loads the base franchise file with the full CoachKey and verifies that
+  // GetCoachDataAll returns data for exactly 32 coaches including known
+  // ground-truth values for Coach 0 (Dennis Erickson / 49ers).
+  group('T-C: Coach non-string data (franchise save)', () {
+    late GamesaveTool tool;
+
+    setUpAll(() {
+      tool = GamesaveTool();
+      final ok = tool.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+      expect(ok, isTrue, reason: 'Base2004Fran_Orig.zip must load');
+    });
+
+    // T-C1
+    test('T-C1 GetCoachDataAll returns all 32 coaches with known values', () {
+      tool.CoachKey = tool.CoachKeyAll;
+      final all = tool.GetCoachDataAll();
+      expect(all, isNotEmpty);
+
+      final coachLines =
+          all.split('\n').where((l) => l.startsWith('Coach,')).toList();
+      expect(coachLines, hasLength(32),
+          reason: 'Expected exactly 32 Coach, lines');
+
+      // Coach 0 is Erickson / 49ers
+      expect(coachLines[0], contains('Dennis'));
+      expect(coachLines[0], contains('Erickson'));
+      // Ground-truth numeric values
+      expect(coachLines[0], contains('38'));  // Wins
+      expect(coachLines[0], contains('42'));  // Losses
+      expect(coachLines[0], contains('7025')); // Photo
+      expect(coachLines[0], contains('60'));   // Overall
+    });
+
+    // T-C2 — Set/Get 1-byte rating fields, in-memory
+    test('T-C2 Set/Get 1-byte rating fields round-trip in memory', () {
+      tool.SetCoachAttribute(0, CoachOffsets.Overall, '99');
+      tool.SetCoachAttribute(0, CoachOffsets.QB, '1');
+      tool.SetCoachAttribute(0, CoachOffsets.Professionalism, '50');
+
+      expect(tool.GetCoachAttribute(0, CoachOffsets.Overall), equals('99'));
+      expect(tool.GetCoachAttribute(0, CoachOffsets.QB), equals('1'));
+      expect(tool.GetCoachAttribute(0, CoachOffsets.Professionalism),
+          equals('50'));
+    });
+
+    // T-C3 — Set/Get Photo (2-byte LE), in-memory
+    test('T-C3 Set/Get Photo 2-byte field round-trip (value requires high byte)', () {
+      tool.SetCoachAttribute(0, CoachOffsets.Photo, '512');
+      // GetCoachAttribute pads Photo to 4 digits
+      expect(tool.GetCoachAttribute(0, CoachOffsets.Photo), equals('0512'));
+    });
+
+    // T-C4 — Set/Get 2-byte stat field — documents Issue B
+    test('T-C4 Wins ≤255 round-trips correctly (Issue B: low byte only)', () {
+      tool.SetCoachAttribute(0, CoachOffsets.Wins, '200');
+      expect(tool.GetCoachAttribute(0, CoachOffsets.Wins), equals('200'));
+    });
+
+    test('T-C4 Wins=256 loses high byte — documents Issue B known limitation', () {
+      tool.SetCoachAttribute(0, CoachOffsets.Wins, '256');
+      // Issue B — known limitation: only low byte stored/retrieved
+      expect(tool.GetCoachAttribute(0, CoachOffsets.Wins), equals('0'));
+    });
+
+    // T-C5 — Set/Get Body field (coach-model enum)
+    group('T-C5 Body field (coach-model enum)', () {
+      setUp(() => StaticUtils.Errors.clear());
+
+      test('original Body for team 0 is a known coach-model key', () {
+        // Fresh load to get pristine value (T-C2 didn't touch Body)
+        final fresh = GamesaveTool();
+        fresh.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+        final body = fresh.GetCoachAttribute(0, CoachOffsets.Body);
+        expect(body, isNot(equals('!!!!Invalid!!!!')));
+      });
+
+      test('set Body to Bill Belichick, get returns Bill Belichick', () {
+        tool.SetCoachAttribute(0, CoachOffsets.Body, '[Bill Belichick]');
+        expect(tool.GetCoachAttribute(0, CoachOffsets.Body),
+            equals('Bill Belichick'));
+        expect(StaticUtils.Errors, isEmpty);
+      });
+
+      test('set Body to invalid coach name adds an error', () {
+        tool.SetCoachAttribute(0, CoachOffsets.Body, '[InvalidCoachName]');
+        expect(StaticUtils.Errors, isNotEmpty);
+      });
+    });
+
+    // T-C12 — CoachKey validation
+    group('T-C12 CoachKey validation', () {
+      setUp(() => StaticUtils.Errors.clear());
+
+      test('bogus field in CoachKey adds an error', () {
+        tool.CoachKey = 'Coach,Team,Overall,BOGUSFIELD';
+        expect(StaticUtils.Errors, isNotEmpty);
+      });
+
+      test('valid partial CoachKey sets key and GetCoachData contains only those fields', () {
+        tool.CoachKey = 'Coach,Team,Overall,QB';
+        expect(StaticUtils.Errors, isEmpty);
+        final data = tool.GetCoachData(0);
+        // Should start with "Coach,49ers," and have Overall + QB values, then end
+        expect(data, startsWith('Coach,49ers,'));
+        // Trailing comma stripped by GetCoachData: "Coach,49ers,<Overall>,<QB>" → 4 parts
+        final parts = data.split(',');
+        expect(parts.length, equals(4),
+            reason: 'Coach,Team,Overall,QB → 4 comma-separated parts (no trailing comma)');
+      });
+    });
+
+    // T-C13 — Shared-offset playcalling fields — documents Issue C
+    test('T-C13 ShotgunRun and IFormRun share offset 0x83 — documents Issue C', () {
+      tool.SetCoachAttribute(0, CoachOffsets.ShotgunRun, '99');
+      // Issue C — intentional shared offset: both names read same byte
+      expect(tool.GetCoachAttribute(0, CoachOffsets.ShotgunRun), equals('99'));
+      expect(tool.GetCoachAttribute(0, CoachOffsets.IFormRun), equals('99'));
+    });
+
+    test('T-C13 SplitbackRun and EmptyRun share offset 0x87 — documents Issue C', () {
+      tool.SetCoachAttribute(0, CoachOffsets.SplitbackRun, '77');
+      // Issue C — intentional shared offset
+      expect(tool.GetCoachAttribute(0, CoachOffsets.SplitbackRun), equals('77'));
+      expect(tool.GetCoachAttribute(0, CoachOffsets.EmptyRun), equals('77'));
+    });
+
+    // T-C14 — InputParser non-string fields round-trip
+    test('T-C14 InputParser Coach line sets numeric fields; save→reload verifies', () async {
+      final fresh = GamesaveTool();
+      fresh.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+      fresh.CoachKey = 'Coach,Team,Overall,QB,Wins,Losses';
+      expect(StaticUtils.Errors, isEmpty,
+          reason: 'CoachKey setup must not produce errors');
+
+      final parser = InputParser(fresh);
+      parser.ProcessLine('CoachKEY=Coach,Team,Overall,QB,Wins,Losses');
+      parser.ProcessLine('Coach,49ers,75,88,12,5');
+
+      expect(fresh.GetCoachAttribute(0, CoachOffsets.Overall), equals('75'));
+      expect(fresh.GetCoachAttribute(0, CoachOffsets.QB), equals('88'));
+      expect(fresh.GetCoachAttribute(0, CoachOffsets.Wins), equals('12'));
+
+      // Save → reload → verify
+      final tempPath =
+          '${Directory.systemTemp.path}/nfl2k5_coach_tc14.dat';
+      fresh.SaveFile(tempPath);
+
+      final reloaded = GamesaveTool();
+      reloaded.LoadSaveFile(tempPath);
+
+      expect(reloaded.GetCoachAttribute(0, CoachOffsets.Overall), equals('75'));
+      expect(reloaded.GetCoachAttribute(0, CoachOffsets.QB), equals('88'));
+      expect(reloaded.GetCoachAttribute(0, CoachOffsets.Wins), equals('12'));
+
+      File(tempPath).deleteSync();
+    });
+  });
+
   // T-7 — checkNamePointers() detects shared string-table entries
   //
   // Flying Finn's editor saves space by pointing multiple player fname/lname

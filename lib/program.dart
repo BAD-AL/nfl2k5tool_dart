@@ -21,6 +21,7 @@ class Program {
     String? saveFileName, outputFileName, dataToApplyTextFile;
     String key = '';
     String coachKey = '';
+    String teamDataKey = '';
 
     bool showAppearance = false;
     bool showSpecialteams = false;
@@ -33,6 +34,9 @@ class Program {
     bool showFreeAgents = false;
     bool showDraftClass = false;
     bool showCoaches = false;
+    bool showCoachesAll = false;
+    bool showTeamData = false;
+    bool showStadiumNames = false;
 
     // Argument processing
     for (int i = 0; i < args.length; i++) {
@@ -50,6 +54,9 @@ class Program {
         case '-fa':   showFreeAgents = true; break;
         case '-dc':   showDraftClass = true; break;
         case '-coach': showCoaches = true; break;
+        case '-coach_all': showCoachesAll = true; break;
+        case '-teams': showTeamData = true; break;
+        case '-show_stadium_names': showStadiumNames = true; break;
         case '-help':
         case '--help':
         case '/help':
@@ -73,6 +80,8 @@ class Program {
             key = args[i].substring(5);
           else if (args[i].startsWith('-CoachKey:'))
             coachKey = args[i].substring(10);
+          else if (args[i].startsWith('-TeamDataKey:'))
+            teamDataKey = args[i].substring(13);
           else
             Logger.error('Argument not applied: ${args[i]}');
           break;
@@ -125,6 +134,8 @@ class Program {
       parser.ProcessText('Key=$key');
     if (coachKey != '')
       parser.ProcessText('CoachKey=$coachKey');
+    if (teamDataKey != '')
+      parser.ProcessText('TeamDataKey=$teamDataKey');
 
     // Apply text data
     if ((dataToApplyTextFile != null || readFromStdIn) && outputFileName != null) {
@@ -224,9 +235,17 @@ class Program {
           builder.write(tool.GetTeamPlayers('FreeAgents', showAbilities, showAppearance, false));
         if (showDraftClass)
           builder.write(tool.GetTeamPlayers('DraftClass', showAbilities, showAppearance, false));
-        if (showCoaches)
-          builder.write(tool.GetCoachDataAll());
       }
+      if (showCoaches)
+        builder.write(tool.GetCoachDataAll());
+      if (showCoachesAll) {
+        tool.CoachKey = tool.CoachKeyAll;
+        builder.write(tool.GetCoachDataAll());
+      }
+      if (showTeamData)
+        builder.write(tool.GetTeamDataAll());
+      if (showStadiumNames)
+        builder.write(tool.GetStadiumNamesList());
       if (showSchedule && tool.saveType == SaveType.Franchise)
         builder.write(tool.GetSchedule());
 
@@ -286,10 +305,14 @@ The following are the available options.
 -sch            Print schedule.
 -fa             Print Free Agents
 -dc             Print draft class
--coach          Print coaches
+-coach          Print coaches (uses current CoachKey)
+-coach_all      Print all coach attributes (overrides CoachKey with full field set)
+-teams          Print team metadata (nickname, city, stadium, etc.)
+-show_stadium_names  Print all available stadium names (for use with [brackets])
 -stdin          Read data from standard in.
 -Key:<key>      Specify key
 -CoachKey:<key> Specify Coach Key
+-TeamDataKey:<key> Specify Team Data Key
 -out:filename   Save modified Save file to <filename>.
 -help           Show this help message.
 ''');

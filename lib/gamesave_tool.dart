@@ -33,6 +33,13 @@ class GamesaveTool {
   static const int _mDraftClassSize = 380;
   static const int _cPlayerDataLength = 0x54;
   static const int _cTeamDiff = 0x1f4;
+  static const int _cTeamDataPtrOffset      = 0x104; // team_block → S3a nickname ptr
+  static const int _cTeamStadiumByteOffset  = 0x118; // team_block → stadium index byte
+  static const int _cTeamStadiumByteOffset2 = 0x154; // duplicate stadium index byte
+
+  // Stadium lookup maps — populated by _buildStadiumLookup() at load time.
+  final Map<int, int>    _stadiumShortNameAddresses = {}; // index → S1a address
+  final Map<String, int> _stadiumNameToIndex        = {}; // short name → index
   static const String NFL2K5Folder = '53450030';
 
   SaveType mSaveType = SaveType.Franchise;
@@ -64,6 +71,7 @@ class GamesaveTool {
     } else {
       InitializeForFranchise();
     }
+    _buildStadiumLookup();
   }
 
   GamesaveTool() {
@@ -189,7 +197,7 @@ class GamesaveTool {
 
   String get CoachKeyAll => mCoachKeyAll;
 
-  String mCoachKeyAll =
+  static const String mCoachKeyAll =
       'Coach,Team,FirstName,LastName,Info1,Info2,Info3,Body,Photo,Wins,Losses,Ties,SeasonsWithTeam,totalSeasons,WinningSeasons,SuperBowls,SuperBowlWins,SuperBowlLosses,PlayoffWins,' +
           'PlayoffLosses,Overall,OvrallOffense,RushFor,PassFor,OverallDefense,PassRush,PassCoverage,QB,RB,TE,WR,OL,DL,LB,SpecialTeams,Professionalism,Preparation,' +
           'Conditioning,Motivation,Leadership,Discipline,Respect,PlaycallingRun,ShotgunRun,IFormRun,SplitbackRun,EmptyRun,ShotgunPass,SplitbackPass,IFormPass,LoneBackPass,EmptyPass';
@@ -230,6 +238,7 @@ class GamesaveTool {
         case CoachOffsets.LastName:
         case CoachOffsets.Info1:
         case CoachOffsets.Info2:
+        case CoachOffsets.Info3:
           SetCoachString(value.replaceAll('"', ''), loc);
           break;
         case CoachOffsets.Photo:
@@ -343,6 +352,246 @@ class GamesaveTool {
     }
     return builder.toString();
   }
+
+  // ─── Team data (S3a) and stadium (S1a) ─────────────────────────────────────
+
+  static const String DefaultTeamKey = 'TeamData,Team,Nickname,City,Stadium';
+  String mTeamKeyAll =
+      'TeamData,Team,Nickname,Abbrev,Stadium,City,AbbrAlt';
+  String get TeamKeyAll => mTeamKeyAll;
+  String mTeamKey = DefaultTeamKey;
+  String get TeamKey => mTeamKey;
+
+  set TeamKey(String value) {
+    String lastAttr = '';
+    try {
+      for (String part in value.split(',')) {
+        if (part.isNotEmpty &&
+            part.toLowerCase() != 'team' &&
+            part.toLowerCase() != 'teamdata') {
+          lastAttr = part;
+          TeamDataOffsets.values.firstWhere(
+              (e) => e.name.toLowerCase() == part.toLowerCase());
+        }
+      }
+      mTeamKey = value;
+    } catch (e) {
+      StaticUtils.AddError(
+          "Error setting TeamKey part='$lastAttr' in '$value'");
+    }
+  }
+
+  /// Scan S1a once at load time to build the stadium index ↔ address maps.
+  void _buildStadiumLookup() {
+    _stadiumShortNameAddresses.clear();
+    _stadiumNameToIndex.clear();
+
+    // S1a ends where S2 begins — the address of coach 0's FirstName string.
+    int s2Start = GetPointerDestination(
+        GetPointerDestination(GetCoachPointer(0)));
+
+    // S1a layout per entry: short_name → city → sNN_code → long_name
+    // We need two-back from the code to get the short name.
+    int i = mStringTableStart;
+    String prevStr      = '';
+    int    prevAddr     = 0;
+    String prevPrevStr  = '';
+    int    prevPrevAddr = 0;
+
+    while (i < s2Start - 1) {
+      // Skip null padding between strings.
+      while (i < s2Start - 1 && GameSaveData![i] == 0) {
+        i += 2;
+      }
+      if (i >= s2Start - 1) break;
+
+      int strStart = i;
+      StringBuffer sb = StringBuffer();
+      while (i < s2Start && GameSaveData![i] != 0) {
+        sb.writeCharCode(GameSaveData![i]);
+        i += 2;
+      }
+      String s = sb.toString();
+      if (s.isEmpty) { i += 2; continue; }
+
+      // Step over the null terminator.
+      i += 2;
+
+      // If this string looks like a stadium code "sNN", two strings back is
+      // the short name (prevStr is city, prevPrevStr is short name).
+      if (s.length == 3 && s[0] == 's') {
+        final int? idx = int.tryParse(s.substring(1));
+        if (idx != null && prevPrevStr.isNotEmpty) {
+          _stadiumShortNameAddresses[idx] = prevPrevAddr;
+          _stadiumNameToIndex[prevPrevStr] = idx;
+        }
+      }
+
+      prevPrevStr  = prevStr;
+      prevPrevAddr = prevAddr;
+      prevStr      = s;
+      prevAddr     = strStart;
+    }
+  }
+
+  /// Returns the index into S3a (0–4) for the given [attr].
+  /// Throws [ArgumentError] for [TeamDataOffsets.Stadium] (no S3a field).
+  int _teamDataOffsetToS3aIndex(TeamDataOffsets attr) {
+    switch (attr) {
+      case TeamDataOffsets.Nickname: return 0;
+      case TeamDataOffsets.Abbrev:   return 1;
+      case TeamDataOffsets.City:     return 3;
+      case TeamDataOffsets.AbbrAlt:  return 4;
+      default:
+        throw ArgumentError('$attr has no S3a field index');
+    }
+  }
+
+  /// Returns the address in S3a of the string at [s3aFieldIndex] for [teamIndex].
+  int _getS3aStringAddress(int teamIndex, int s3aFieldIndex) {
+    int teamBlock    = m49ersPlayerPointersStart + teamIndex * _cTeamDiff;
+    int nicknameAddr = GetPointerDestination(teamBlock + _cTeamDataPtrOffset);
+    int addr = nicknameAddr;
+    for (int f = 0; f < s3aFieldIndex; f++) {
+      String s = GetString(addr);
+      addr += s.length * 2 + 2; // stride over string + null terminator
+    }
+    return addr;
+  }
+
+  String GetStadiumNameByIndex(int stadiumIndex) {
+    int? addr = _stadiumShortNameAddresses[stadiumIndex];
+    if (addr == null) return '!!!!Invalid!!!!';
+    return GetString(addr);
+  }
+
+  String GetStadiumName(int teamIndex) {
+    if (teamIndex < 0 || teamIndex >= 32) return '!!!!Invalid!!!!';
+    int teamBlock = m49ersPlayerPointersStart + teamIndex * _cTeamDiff;
+    int idx = GameSaveData![teamBlock + _cTeamStadiumByteOffset];
+    return GetStadiumNameByIndex(idx);
+  }
+
+  String GetTeamString(int teamIndex, TeamDataOffsets attr) {
+    if (teamIndex < 0 || teamIndex >= 32) return '!!!!Invalid!!!!';
+    if (attr == TeamDataOffsets.Stadium) return GetStadiumName(teamIndex);
+    return GetString(
+        _getS3aStringAddress(teamIndex, _teamDataOffsetToS3aIndex(attr)));
+  }
+
+  void SetStadiumIndex(int teamIndex, int stadiumIndex) {
+    if (teamIndex < 0 || teamIndex >= 32) return;
+    if (!_stadiumShortNameAddresses.containsKey(stadiumIndex)) {
+      StaticUtils.AddError(
+          'SetStadiumIndex: unknown stadium index $stadiumIndex');
+      return;
+    }
+    int teamBlock = m49ersPlayerPointersStart + teamIndex * _cTeamDiff;
+    SetByte(teamBlock + _cTeamStadiumByteOffset,  stadiumIndex);
+    SetByte(teamBlock + _cTeamStadiumByteOffset2, stadiumIndex);
+    // Keep S3a StadiumNum text in sync (always 2 chars — always same-length safe).
+    int numAddr = _getS3aStringAddress(teamIndex, 2);
+    String padded = stadiumIndex.toString().padLeft(2, '0');
+    for (int i = 0; i < 2; i++) {
+      SetByte(numAddr + i * 2,     padded.codeUnitAt(i));
+      SetByte(numAddr + i * 2 + 1, 0);
+    }
+  }
+
+  void SetTeamString(int teamIndex, TeamDataOffsets attr, String value) {
+    if (teamIndex < 0 || teamIndex >= 32) return;
+
+    if (attr == TeamDataOffsets.Stadium) {
+      int? idx = _stadiumNameToIndex[value];
+      if (idx == null) {
+        StaticUtils.AddError(
+            "SetTeamString: unknown stadium '$value' for "
+            "${sTeamsDataOrder[teamIndex]}");
+        return;
+      }
+      SetStadiumIndex(teamIndex, idx);
+      return;
+    }
+
+    int addr    = _getS3aStringAddress(teamIndex, _teamDataOffsetToS3aIndex(attr));
+    String curr = GetString(addr);
+    if (value.length > curr.length) {
+      StaticUtils.AddError(
+          'SetTeamString: value too long for ${sTeamsDataOrder[teamIndex]} '
+          '${attr.name}: "$curr"(${curr.length}) → "$value"(${value.length}). '
+          'Maximum length is ${curr.length}.');
+      return;
+    }
+    // Shorter values are right-padded with spaces to preserve the string length
+    // in S3a.  (The text-file parser trims trailing whitespace from lines, so
+    // callers cannot pass trailing spaces explicitly.)
+    if (value.length < curr.length) {
+      value = value.padRight(curr.length);
+    }
+    for (int i = 0; i < value.length; i++) {
+      SetByte(addr + i * 2,     value.codeUnitAt(i));
+      SetByte(addr + i * 2 + 1, 0);
+    }
+  }
+
+  String GetTeamData(int teamIndex) {
+    if (teamIndex < 0 || teamIndex >= 32) return '';
+    StringBuffer sb = StringBuffer();
+    String key = TeamKey;
+    for (String part in key.split(',')) {
+      String lp = part.toLowerCase();
+      if (lp == 'teamdata' || lp == 'team') {
+        if (lp == 'teamdata') {
+          sb.write('TeamData,');
+        } else {
+          sb.write('${sTeamsDataOrder[teamIndex]},');
+        }
+        continue;
+      }
+      try {
+        TeamDataOffsets attr = TeamDataOffsets.values
+            .firstWhere((e) => e.name.toLowerCase() == lp);
+        String val = GetTeamString(teamIndex, attr);
+        if (attr == TeamDataOffsets.Stadium) {
+          sb.write('[$val],');
+        } else {
+          sb.write('$val,');
+        }
+      } catch (_) {
+        // unknown key part — skip
+      }
+    }
+    String result = sb.toString();
+    if (result.endsWith(',')) result = result.substring(0, result.length - 1);
+    return result;
+  }
+
+  String GetTeamDataAll() {
+    StringBuffer sb = StringBuffer();
+    sb.write('\n\nTeamDataKey=');
+    sb.write(TeamKey);
+    sb.write('\n');
+    for (int i = 0; i < 32; i++) {
+      sb.write(GetTeamData(i));
+      sb.write('\r\n');
+    }
+    return sb.toString();
+  }
+
+  /// Returns all known stadium names sorted by index, one per line.
+  /// Format: "  NN: Stadium Name"  (useful for knowing valid [bracket] values)
+  String GetStadiumNamesList() {
+    final sb = StringBuffer();
+    sb.write('\nStadium names:\n');
+    final indices = _stadiumShortNameAddresses.keys.toList()..sort();
+    for (final idx in indices) {
+      final name = GetStadiumNameByIndex(idx);
+      sb.write('  ${idx.toString().padLeft(2)}: [$name]\n');
+    }
+    return sb.toString();
+  }
+
+  // ─── End team data ──────────────────────────────────────────────────────────
 
   void AutoPlayerStartLocation() {
     int firstPlayerLoc = GameSaveData!.length;
@@ -1357,17 +1606,37 @@ class GamesaveTool {
     // overwrite).  The ensuing AdjustPlayerNamePointers call would then corrupt
     // all valid name pointers using the wrong shift origin.
     if (stringLoc < mStringTableStart || stringLoc >= mModifiableNameSectionEnd) {
-      Logger.log(
-          '#SetName: skipping – pointer at 0x${ptrLoc.toRadixString(16)} '
+      final msg = 'SetName: skipping – pointer at 0x${ptrLoc.toRadixString(16)} '
           'resolves to 0x${stringLoc.toRadixString(16)}, outside modifiable '
           'name range 0x${mStringTableStart.toRadixString(16)}–'
-          '0x${mModifiableNameSectionEnd.toRadixString(16)}');
+          '0x${mModifiableNameSectionEnd.toRadixString(16)}';
+      Logger.log('#$msg');
+      StaticUtils.AddError(msg);
       return;
     }
 
     String prevName = GetName(ptrLoc);
     if (prevName != name) {
       int diff = 2 * (name.length - prevName.length);
+
+      // Overflow guard: reject growth that would push real data past the section
+      // boundary.  ShiftDataDown is bounded at mModifiableNameSectionEnd, so
+      // any non-zero bytes in the last `diff` bytes would be silently discarded
+      // and the null terminator would be written past the boundary.
+      if (diff > 0) {
+        bool hasRoom = true;
+        for (int i = mModifiableNameSectionEnd - diff;
+            i < mModifiableNameSectionEnd;
+            i++) {
+          if (GameSaveData![i] != 0) { hasRoom = false; break; }
+        }
+        if (!hasRoom) {
+          StaticUtils.AddError(
+              'SetName: not enough space in player name section '
+              '(need $diff more bytes). String not changed.');
+          return;
+        }
+      }
 
       if (diff > 0)
         ShiftDataDown(stringLoc, diff, mModifiableNameSectionEnd);
@@ -1432,14 +1701,18 @@ class GamesaveTool {
   }
 
   void ShiftDataDown(int startIndex, int amount, int dataEnd) {
-    for (int i = dataEnd - amount; i > startIndex; i--) {
+    for (int i = dataEnd - 1; i > startIndex; i--) {
       SetByte(i, GameSaveData![i - amount]);
     }
   }
 
   void ShiftDataUp(int startIndex, int amount, int dataEnd) {
-    for (int i = startIndex; i < dataEnd; i++) {
+    for (int i = startIndex; i < dataEnd - amount; i++) {
       SetByte(i, GameSaveData![i + amount]);
+    }
+    // Zero the vacated tail so freed slack is clean and guards work correctly.
+    for (int i = dataEnd - amount; i < dataEnd; i++) {
+      SetByte(i, 0);
     }
   }
 
@@ -1469,6 +1742,8 @@ class GamesaveTool {
     }
     return retVal;
   }
+
+  String GetPlayerCollege(int player) => GetCollege(player);
 
   String GetName(int namePointerLoc) {
     int dataLocation = GetPointerDestination(namePointerLoc);
@@ -1502,6 +1777,22 @@ class GamesaveTool {
 
       int coachStringEnd = GetPointerDestination(GetPointerDestination(GetCoachPointer(0))) + mCoachStringSectionLength;
 
+      // Issue D fix: ShiftDataDown discards the last `diff` bytes of the
+      // section. Reject the write if those bytes contain real data (non-zero),
+      // which would indicate the section is full and data would be lost.
+      if (diff > 0) {
+        bool hasRoom = true;
+        for (int i = coachStringEnd - diff; i < coachStringEnd; i++) {
+          if (GameSaveData![i] != 0) { hasRoom = false; break; }
+        }
+        if (!hasRoom) {
+          StaticUtils.AddError(
+              'SetCoachString: not enough space in coach string section '
+              '(need $diff more bytes). String not changed.');
+          return;
+        }
+      }
+
       if (diff > 0)
         ShiftDataDown(stringLoc, diff, coachStringEnd);
       else if (diff < 0)
@@ -1524,6 +1815,7 @@ class GamesaveTool {
     int lastNamePtrLoc = 0;
     int info1StringPtrLoc = 0;
     int info2StringPtrLoc = 0;
+    int info3StringPtrLoc = 0;
     int loc = 0;
 
     int coachStringEnd = GetPointerDestination(GetPointerDestination(GetCoachPointer(0))) + mCoachStringSectionLength;
@@ -1533,6 +1825,7 @@ class GamesaveTool {
       lastNamePtrLoc = firstNamePtrLoc + CoachOffsets.LastName.value;
       info1StringPtrLoc = firstNamePtrLoc + CoachOffsets.Info1.value;
       info2StringPtrLoc = firstNamePtrLoc + CoachOffsets.Info2.value;
+      info3StringPtrLoc = firstNamePtrLoc + CoachOffsets.Info3.value;
 
       loc = GetPointerDestination(firstNamePtrLoc);
       if (loc < coachStringEnd && loc >= locationOfChange)
@@ -1549,6 +1842,10 @@ class GamesaveTool {
       loc = GetPointerDestination(info2StringPtrLoc);
       if (loc < coachStringEnd && loc >= locationOfChange)
         AdjustPointer(info2StringPtrLoc, difference);
+
+      loc = GetPointerDestination(info3StringPtrLoc);
+      if (loc < coachStringEnd && loc >= locationOfChange)
+        AdjustPointer(info3StringPtrLoc, difference);
     }
   }
 
