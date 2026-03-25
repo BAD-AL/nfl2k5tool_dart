@@ -36,6 +36,29 @@ class StaticUtils {
   }
   // #endregion
 
+  // #region Warning functionality
+  /// Non-fatal warnings (value still written; caller may want to notify the user).
+  static List<String> Warnings = [];
+
+  /// Add a warning to the session.
+  static void AddWarning(String warning) {
+    Warnings.add(warning);
+  }
+
+  /// Shows warnings (if any) to logger, then clears the list.
+  static void ShowWarnings() {
+    if (Warnings.isNotEmpty) {
+      final b = StringBuffer();
+      for (final w in Warnings) {
+        b.write(w);
+        b.write('\n');
+      }
+      Logger.log(b.toString());
+      Warnings = [];
+    }
+  }
+  // #endregion
+
   /// Find string [str] (unicode / UTF-16LE string) in the data byte array.
   static List<int> FindStringInFile(String str, Uint8List data, int start, int end,
       [bool nullByte = false]) {

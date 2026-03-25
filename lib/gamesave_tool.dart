@@ -9,6 +9,7 @@ import 'data_map.dart';
 import 'depth_chart.dart';
 import 'scheduler_helper.dart';
 import 'logger.dart';
+import 'jersey_data.dart';
 
 /// The class that reads and modifies the xbox game save file.
 class GamesaveTool {
@@ -33,13 +34,24 @@ class GamesaveTool {
   static const int _mDraftClassSize = 380;
   static const int _cPlayerDataLength = 0x54;
   static const int _cTeamDiff = 0x1f4;
-  static const int _cTeamDataPtrOffset      = 0x104; // team_block → S3a nickname ptr
-  static const int _cTeamStadiumByteOffset  = 0x118; // team_block → stadium index byte
-  static const int _cTeamStadiumByteOffset2 = 0x154; // duplicate stadium index byte
+  static const int _cTeamDataPtrOffset       = 0x104; // team_block → S3a nickname ptr
+  static const int _cTeamStadiumByteOffset   = 0x118; // team_block → stadium index byte
+  static const int _cTeamLogoByteOffset      = 0x154; // team_block → logo/PBP index byte
+                                                       // (S3a[2] string kept in sync)
+  static const int _cTeamDefaultJerseyOffset = 0x192; // team_block → default jersey index
+  int _cPlaybookTableBase = 0x2C90;                     // absolute; stride 8 per team
+                                                        // bytes 0-3=offense ptr, 4-7=defense ptr
+                                                        // (relative string pointers to name/abbrev)
+                                                        // franchise=0x2C90, roster=0x29B0
 
   // Stadium lookup maps — populated by _buildStadiumLookup() at load time.
   final Map<int, int>    _stadiumShortNameAddresses = {}; // index → S1a address
   final Map<String, int> _stadiumNameToIndex        = {}; // short name → index
+
+  // Playbook lookup — populated by _buildPlaybookLookup() at load time.
+  // Keyed by offense name (e.g. "West Coast"); value is (offAddr, defAddr) pair.
+  final Map<String, int> _playbookOffAddr = {}; // offense name → offense string address
+  final Map<String, int> _playbookDefAddr = {}; // offense name → defense string address
   static const String NFL2K5Folder = '53450030';
 
   SaveType mSaveType = SaveType.Franchise;
@@ -72,6 +84,7 @@ class GamesaveTool {
       InitializeForFranchise();
     }
     _buildStadiumLookup();
+    _buildPlaybookLookup();
   }
 
   GamesaveTool() {
@@ -159,6 +172,7 @@ class GamesaveTool {
     m49ersPlayerPointersStart = 0x44a8;
     m49ersNumPlayersAddress = 0x45c4;
     mMaxPlayers = 2317;
+    _cPlaybookTableBase = 0x2C90;
     SchedulerHelper.FranchiseGameOneYearLocation = 0x917ef;
     Year = 2000 + GameSaveData![SchedulerHelper.FranchiseGameOneYearLocation];
     AutoPlayerStartLocation();
@@ -177,6 +191,7 @@ class GamesaveTool {
     m49ersPlayerPointersStart = 0x41c8;
     m49ersNumPlayersAddress = 0x42e4;
     mMaxPlayers = 1943;
+    _cPlaybookTableBase = 0x29B0;
     Year = 0;
     AutoPlayerStartLocation();
   }
@@ -355,9 +370,9 @@ class GamesaveTool {
 
   // ─── Team data (S3a) and stadium (S1a) ─────────────────────────────────────
 
-  static const String DefaultTeamKey = 'TeamData,Team,Nickname,City,Stadium';
+  static const String DefaultTeamKey = 'TeamData,Team,Nickname,Abbrev,Stadium,City,AbbrAlt,Logo,Playbook,DefaultJersey';
   String mTeamKeyAll =
-      'TeamData,Team,Nickname,Abbrev,Stadium,City,AbbrAlt';
+      'TeamData,Team,Nickname,Abbrev,Stadium,City,AbbrAlt,Logo,Playbook,DefaultJersey';
   String get TeamKeyAll => mTeamKeyAll;
   String mTeamKey = DefaultTeamKey;
   String get TeamKey => mTeamKey;
@@ -434,8 +449,57 @@ class GamesaveTool {
     }
   }
 
+  /// Scan all 32 teams' playbook pointers to build name/abbrev ↔ address maps.
+  /// Silently skips entries whose pointer resolves outside the file (roster files
+  /// have no playbook table at _cPlaybookTableBase).
+  void _buildPlaybookLookup() {
+    _playbookOffAddr.clear();
+    _playbookDefAddr.clear();
+    final int len = GameSaveData!.length;
+
+    // Find the start of the playbook string block via team 0's offense pointer.
+    final int firstPtrLoc = _cPlaybookTableBase;
+    if (firstPtrLoc + 4 > len) return;
+    int addr = GetPointerDestination(firstPtrLoc);
+    if (addr < 0 || addr >= len) return;
+
+    // Walk (offense-name, defense-abbrev) pairs consecutively in the string table.
+    // All legitimate defense abbreviations are all-uppercase and ≤ 4 chars
+    // (e.g. "SF", "WCO", "UA").  The first string that fails that test ends the block.
+    while (addr < len) {
+      int offAddr = addr;
+      String offName = GetString(offAddr);
+      if (offName.isEmpty) break;
+      int defAddr = offAddr + offName.length * 2 + 2;
+      if (defAddr + 2 > len) break;
+      String defAbbrev = GetString(defAddr);
+      if (defAbbrev.isEmpty || defAbbrev.length > 4 ||
+          defAbbrev != defAbbrev.toUpperCase()) break;
+      _playbookOffAddr[offName] = offAddr;
+      _playbookDefAddr[offName] = defAddr;
+      addr = defAddr + defAbbrev.length * 2 + 2;
+    }
+  }
+
+  /// Convert a playbook name string to its PB_ token, e.g. "West Coast" → "PB_West_Coast".
+  static String _playbookNameToToken(String name) =>
+      'PB_${name.replaceAll(' ', '_')}';
+
+  /// Convert a PB_ token back to the name string, e.g. "PB_West_Coast" → "West Coast".
+  static String _playbookTokenToName(String token) =>
+      token.startsWith('PB_') ? token.substring(3).replaceAll('_', ' ') : token;
+
+  /// Write a 4-byte signed relative pointer at [ptrLoc] that points to [targetAddr].
+  void _writePointerToAddr(int ptrLoc, int targetAddr) {
+    int pointer = targetAddr - ptrLoc + 1;
+    SetByte(ptrLoc,     pointer & 0xff);
+    SetByte(ptrLoc + 1, (pointer >> 8)  & 0xff);
+    SetByte(ptrLoc + 2, (pointer >> 16) & 0xff);
+    SetByte(ptrLoc + 3, (pointer >> 24) & 0xff);
+  }
+
   /// Returns the index into S3a (0–4) for the given [attr].
-  /// Throws [ArgumentError] for [TeamDataOffsets.Stadium] (no S3a field).
+  /// Throws [ArgumentError] for offsets with no S3a field.
   int _teamDataOffsetToS3aIndex(TeamDataOffsets attr) {
     switch (attr) {
       case TeamDataOffsets.Nickname: return 0;
@@ -475,8 +539,19 @@ class GamesaveTool {
   String GetTeamString(int teamIndex, TeamDataOffsets attr) {
     if (teamIndex < 0 || teamIndex >= 32) return '!!!!Invalid!!!!';
     if (attr == TeamDataOffsets.Stadium) return GetStadiumName(teamIndex);
-    return GetString(
-        _getS3aStringAddress(teamIndex, _teamDataOffsetToS3aIndex(attr)));
+    int teamBlock = m49ersPlayerPointersStart + teamIndex * _cTeamDiff;
+    switch (attr) {
+      case TeamDataOffsets.Logo:
+        return GameSaveData![teamBlock + _cTeamLogoByteOffset].toString();
+      case TeamDataOffsets.DefaultJersey:
+        return GameSaveData![teamBlock + _cTeamDefaultJerseyOffset].toString();
+      case TeamDataOffsets.Playbook:
+        return _playbookNameToToken(
+            GetString(GetPointerDestination(_cPlaybookTableBase + teamIndex * 8)));
+      default:
+        return GetString(
+            _getS3aStringAddress(teamIndex, _teamDataOffsetToS3aIndex(attr)));
+    }
   }
 
   void SetStadiumIndex(int teamIndex, int stadiumIndex) {
@@ -487,11 +562,18 @@ class GamesaveTool {
       return;
     }
     int teamBlock = m49ersPlayerPointersStart + teamIndex * _cTeamDiff;
-    SetByte(teamBlock + _cTeamStadiumByteOffset,  stadiumIndex);
-    SetByte(teamBlock + _cTeamStadiumByteOffset2, stadiumIndex);
-    // Keep S3a StadiumNum text in sync (always 2 chars — always same-length safe).
+    SetByte(teamBlock + _cTeamStadiumByteOffset, stadiumIndex);
+    // For standard NFL teams, stadium index equals logo/PBP index — keep in sync.
+    SetLogoIndex(teamIndex, stadiumIndex);
+  }
+
+  void SetLogoIndex(int teamIndex, int logoIndex) {
+    if (teamIndex < 0 || teamIndex >= 32) return;
+    int teamBlock = m49ersPlayerPointersStart + teamIndex * _cTeamDiff;
+    SetByte(teamBlock + _cTeamLogoByteOffset, logoIndex);
+    // Keep S3a[2] logo string in sync (always 2 chars — same-length safe).
     int numAddr = _getS3aStringAddress(teamIndex, 2);
-    String padded = stadiumIndex.toString().padLeft(2, '0');
+    String padded = logoIndex.toString().padLeft(2, '0');
     for (int i = 0; i < 2; i++) {
       SetByte(numAddr + i * 2,     padded.codeUnitAt(i));
       SetByte(numAddr + i * 2 + 1, 0);
@@ -511,6 +593,48 @@ class GamesaveTool {
       }
       SetStadiumIndex(teamIndex, idx);
       return;
+    }
+
+    // Numeric byte fields
+    int? intVal = int.tryParse(value.trim());
+    int teamBlock = m49ersPlayerPointersStart + teamIndex * _cTeamDiff;
+    switch (attr) {
+      case TeamDataOffsets.Logo:
+        if (intVal == null) {
+          StaticUtils.AddError('SetTeamString: Logo must be an integer, got "$value"');
+          return;
+        }
+        SetLogoIndex(teamIndex, intVal);
+        return;
+      case TeamDataOffsets.DefaultJersey:
+        if (intVal == null) {
+          StaticUtils.AddError('SetTeamString: DefaultJersey must be an integer, got "$value"');
+          return;
+        }
+        final jerseyList = kTeamJerseyNames[sTeamsDataOrder[teamIndex]];
+        if (jerseyList != null && (intVal < 0 || intVal >= jerseyList.length)) {
+          StaticUtils.AddWarning(
+              'SetTeamString: DefaultJersey index $intVal out of range for '
+              '${sTeamsDataOrder[teamIndex]} (valid: 0–${jerseyList.length - 1})');
+        }
+        SetByte(teamBlock + _cTeamDefaultJerseyOffset, intVal);
+        return;
+      case TeamDataOffsets.Playbook: {
+        final name = _playbookTokenToName(value);
+        final offAddr = _playbookOffAddr[name];
+        final defAddr = _playbookDefAddr[name];
+        if (offAddr == null || defAddr == null) {
+          StaticUtils.AddError(
+              'SetTeamString: unknown playbook "$value" for ${sTeamsDataOrder[teamIndex]}. '
+              'Known: ${_playbookOffAddr.keys.map(_playbookNameToToken).join(', ')}');
+          return;
+        }
+        _writePointerToAddr(_cPlaybookTableBase + teamIndex * 8,     offAddr);
+        _writePointerToAddr(_cPlaybookTableBase + teamIndex * 8 + 4, defAddr);
+        return;
+      }
+      default:
+        break;
     }
 
     int addr    = _getS3aStringAddress(teamIndex, _teamDataOffsetToS3aIndex(attr));
@@ -578,6 +702,27 @@ class GamesaveTool {
     return sb.toString();
   }
 
+  /// Returns the jersey name for [teamIndex] at [jerseyIndex], or null if
+  /// [teamIndex] or [jerseyIndex] is out of range.
+  String? GetJerseyName(int teamIndex, int jerseyIndex) {
+    if (teamIndex < 0 || teamIndex >= 32) return null;
+    final list = kTeamJerseyNames[sTeamsDataOrder[teamIndex]];
+    if (list == null || jerseyIndex < 0 || jerseyIndex >= list.length) return null;
+    return list[jerseyIndex];
+  }
+
+  /// Returns all jersey names for [teamIndex], one per line with index prefix.
+  /// Format: "  N: Jersey Name"
+  String GetJerseyNamesList(int teamIndex) {
+    if (teamIndex < 0 || teamIndex >= 32) return '';
+    final list = kTeamJerseyNames[sTeamsDataOrder[teamIndex]] ?? [];
+    final sb = StringBuffer();
+    for (int i = 0; i < list.length; i++) {
+      sb.write('  $i: ${list[i]}\n');
+    }
+    return sb.toString();
+  }
+
   /// Returns all known stadium names sorted by index, one per line.
   /// Format: "  NN: Stadium Name"  (useful for knowing valid [bracket] values)
   String GetStadiumNamesList() {
@@ -587,6 +732,16 @@ class GamesaveTool {
     for (final idx in indices) {
       final name = GetStadiumNameByIndex(idx);
       sb.write('  ${idx.toString().padLeft(2)}: [$name]\n');
+    }
+    return sb.toString();
+  }
+
+  /// Returns all known playbook names, one per line, as PB_ tokens.
+  String GetPlaybookNamesList() {
+    final sb = StringBuffer();
+    sb.write('\nPlaybook names:\n');
+    for (final name in _playbookOffAddr.keys) {
+      sb.write('  ${_playbookNameToToken(name)}\n');
     }
     return sb.toString();
   }

@@ -261,12 +261,18 @@ enum CoachOffsets {
 }
 
 enum TeamDataOffsets {
-  Nickname, // S3a[0] e.g. "49ers"
-  Abbrev,   // S3a[1] e.g. "SF"
-  Stadium,  // special: reads S1a via byte index; writes via SetStadiumIndex
-            // formatted with [brackets] in text files, e.g. "[San Francisco Park]"
-  City,     // S3a[3] e.g. "San Francisco"
-  AbbrAlt,  // S3a[4] e.g. "SF" (repeated for a second display context)
+  Nickname,      // S3a[0] e.g. "49ers"
+  Abbrev,        // S3a[1] e.g. "SF"
+  Stadium,       // special: reads S1a via byte index; writes via SetStadiumIndex
+                 // formatted with [brackets] in text files, e.g. "[San Francisco Park]"
+  City,          // S3a[3] e.g. "San Francisco"
+  AbbrAlt,       // S3a[4] e.g. "SF" (repeated for a second display context)
+  Logo,          // logo/PBP team index byte (teamBlock+0x154) + S3a[2] string; decimal int
+  Playbook,      // playbook selection; stored as two relative pointers (name + abbrev).
+                 // value format: "PB_" + name with spaces replaced by "_"
+                 // e.g. "PB_49ers", "PB_West_Coast", "PB_General"
+                 // get/set updates both offense and defense pointers atomically
+  DefaultJersey, // default jersey index byte (teamBlock+0x192); 0=home 1=away
 }
 
 enum FormulaMode { Normal, Add, Percent }

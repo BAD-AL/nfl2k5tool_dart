@@ -25,10 +25,14 @@ const String _baseRoster = 'years/BaseRoster/SAVEGAME.DAT';
 // Roster-mode team-block base addresses (m49ersPlayerPointersStart = 0x41C8,
 // _cTeamDiff = 0x1F4):
 //   team 0 block = 0x41C8
-//   +0x118 (stadium byte)          = 0x42E0
-//   +0x154 (stadium byte duplicate) = 0x431C
-const int _team0StadiumByte1 = 0x42E0;
-const int _team0StadiumByte2 = 0x431C;
+//   +0x118 (stadium byte)    = 0x42E0
+//   +0x154 (logo/PBP byte)   = 0x431C
+//   +0x192 (default jersey)  = 0x435A
+// Playbook table (absolute): 0x2C90, stride 8 per team
+//   team 0 offense = 0x2C90, defense = 0x2C94
+const int _team0StadiumByte1   = 0x42E0;
+const int _team0StadiumByte2   = 0x431C; // logo/PBP byte
+const int _team0JerseyByte     = 0x435A;
 
 void main() {
   group('T-S15–T-S23: Team data and stadium operations (roster save)', () {
@@ -568,6 +572,181 @@ void main() {
   // S1a (stadium short-name strings) is read-only from our tool's perspective.
   // Verify that coach string (S2) edits and team metadata (S3a) same-length writes
   // do not accidentally overwrite the S1a section.
+
+  // ─── T-S27: Logo field ───────────────────────────────────────────────────────
+
+  group('T-S27 Logo field get/set (roster save)', () {
+    test('GetTeamString Logo returns expected index for all 32 teams', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      // 49ers logo=25, Bears=5 per ENFLogo.txt (same as stadium index)
+      expect(tool.GetTeamString(0, TeamDataOffsets.Logo), equals('25'));
+      expect(tool.GetTeamString(1, TeamDataOffsets.Logo), equals('5'));
+    });
+
+    test('SetTeamString Logo updates logo byte and S3a[2] string', () {
+      StaticUtils.Errors.clear();
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+
+      tool.SetTeamString(0, TeamDataOffsets.Logo, '5'); // 49ers → Bears logo
+      expect(tool.GetTeamString(0, TeamDataOffsets.Logo), equals('5'));
+      // Raw logo/PBP byte at +0x154
+      expect(tool.GameSaveData![_team0StadiumByte2], equals(5));
+      // Stadium byte at +0x118 must be untouched (still SF=25)
+      expect(tool.GameSaveData![_team0StadiumByte1], equals(25));
+      expect(StaticUtils.Errors, isEmpty);
+    });
+
+    test('SetTeamString Logo rejects non-integer value', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      StaticUtils.Errors.clear();
+      tool.SetTeamString(0, TeamDataOffsets.Logo, 'Bears');
+      expect(StaticUtils.Errors, isNotEmpty);
+    });
+  });
+
+  // ─── T-S28: Playbook fields ───────────────────────────────────────────────
+
+  // Playbook table: franchise=0x2C90, roster=0x29B0 (same -0x2E0 delta as m49ersPlayerPointersStart).
+  // Value format: "PB_" + offense name with spaces → underscores, e.g. "PB_West_Coast".
+  // Both offense and defense pointers are written atomically from a single Playbook value.
+  group('T-S28 Playbook get/set (franchise save)', () {
+    late GamesaveTool tool;
+    setUpAll(() {
+      tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+    });
+
+    test('GetTeamString returns PB_-prefixed token for all 32 teams', () {
+      for (int t = 0; t < 32; t++) {
+        final pb = tool.GetTeamString(t, TeamDataOffsets.Playbook);
+        expect(pb, startsWith('PB_'), reason: 'Team $t Playbook should start with PB_');
+      }
+      expect(tool.GetTeamString(0, TeamDataOffsets.Playbook), equals('PB_49ers'));
+      expect(tool.GetTeamString(1, TeamDataOffsets.Playbook), equals('PB_Bears'));
+    });
+
+    test('SetTeamString Playbook round-trips (both pointers updated atomically)', () {
+      StaticUtils.Errors.clear();
+      final t2 = GamesaveTool();
+      t2.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+
+      final orig = t2.GetTeamString(0, TeamDataOffsets.Playbook);
+      final bears = t2.GetTeamString(1, TeamDataOffsets.Playbook);
+      t2.SetTeamString(0, TeamDataOffsets.Playbook, bears);
+      expect(t2.GetTeamString(0, TeamDataOffsets.Playbook), equals(bears));
+      expect(StaticUtils.Errors, isEmpty);
+      // Restore and verify
+      t2.SetTeamString(0, TeamDataOffsets.Playbook, orig);
+      expect(t2.GetTeamString(0, TeamDataOffsets.Playbook), equals(orig));
+    });
+
+    test('SetTeamString Playbook reports error for unknown token', () {
+      StaticUtils.Errors.clear();
+      final t2 = GamesaveTool();
+      t2.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+      t2.SetTeamString(0, TeamDataOffsets.Playbook, 'PB_NonExistent');
+      expect(StaticUtils.Errors, isNotEmpty);
+      StaticUtils.Errors.clear();
+    });
+  });
+
+  group('T-S28b Playbook get/set (roster save)', () {
+    test('GetTeamString returns correct PB_ tokens from roster file', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      // Roster playbook table at 0x29B0
+      expect(tool.GetTeamString(0, TeamDataOffsets.Playbook), equals('PB_49ers'));
+      expect(tool.GetTeamString(1, TeamDataOffsets.Playbook), equals('PB_Bears'));
+      for (int t = 0; t < 32; t++) {
+        expect(tool.GetTeamString(t, TeamDataOffsets.Playbook), startsWith('PB_'),
+            reason: 'Team $t Playbook empty in roster mode');
+      }
+    });
+  });
+
+  // ─── T-S29: DefaultJersey field ──────────────────────────────────────────
+
+  group('T-S29 DefaultJersey get/set (roster save)', () {
+    test('GetTeamString DefaultJersey returns 0 for base roster', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      expect(tool.GetTeamString(0, TeamDataOffsets.DefaultJersey), equals('0'));
+    });
+
+    test('SetTeamString DefaultJersey updates jersey byte', () {
+      StaticUtils.Errors.clear();
+      StaticUtils.Warnings.clear();
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+
+      tool.SetTeamString(0, TeamDataOffsets.DefaultJersey, '1');
+      expect(tool.GetTeamString(0, TeamDataOffsets.DefaultJersey), equals('1'));
+      expect(tool.GameSaveData![_team0JerseyByte], equals(1));
+      expect(StaticUtils.Errors,   isEmpty);
+      expect(StaticUtils.Warnings, isEmpty, reason: 'index 1 is valid for 49ers');
+    });
+
+    test('SetTeamString DefaultJersey rejects non-integer value', () {
+      StaticUtils.Errors.clear();
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      tool.SetTeamString(0, TeamDataOffsets.DefaultJersey, 'home');
+      expect(StaticUtils.Errors, isNotEmpty);
+    });
+
+    test('SetTeamString DefaultJersey warns (but writes) out-of-range index', () {
+      StaticUtils.Errors.clear();
+      StaticUtils.Warnings.clear();
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+
+      // 49ers have 8 jerseys (0–7); index 99 is out of range
+      tool.SetTeamString(0, TeamDataOffsets.DefaultJersey, '99');
+      expect(StaticUtils.Errors,   isEmpty,    reason: 'out-of-range should be warning, not error');
+      expect(StaticUtils.Warnings, isNotEmpty, reason: 'out-of-range should produce a warning');
+      // Value was still written
+      expect(tool.GameSaveData![_team0JerseyByte], equals(99));
+    });
+  });
+
+  // ─── T-S30: GetJerseyName helper ─────────────────────────────────────────
+
+  group('T-S30 GetJerseyName helper', () {
+    test('returns correct name for known index', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      // 49ers index 0 = '1998 - 2004 Uniform'
+      expect(tool.GetJerseyName(0, 0), equals('1998 - 2004 Uniform'));
+      // 49ers index 7 = '2004 Alternate 1'
+      expect(tool.GetJerseyName(0, 7), equals('2004 Alternate 1'));
+    });
+
+    test('returns null for out-of-range index', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      expect(tool.GetJerseyName(0, 99), isNull);
+      expect(tool.GetJerseyName(0, -1), isNull);
+    });
+
+    test('returns null for invalid team index', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      expect(tool.GetJerseyName(-1, 0), isNull);
+      expect(tool.GetJerseyName(32, 0), isNull);
+    });
+
+    test('GetJerseyNamesList returns all entries with index prefix', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile(_baseRoster));
+      final list = tool.GetJerseyNamesList(0); // 49ers
+      expect(list, contains('0: 1998 - 2004 Uniform'));
+      expect(list, contains('7: 2004 Alternate 1'));
+      expect(list.split('\n').where((l) => l.trim().isNotEmpty).length, equals(8));
+    });
+  });
 
   group('T-QR-6 S1a stadium names unchanged after S2 and S3a writes', () {
     test('all 32 stadium names survive a S2 shrink + S3a same-length edit', () {

@@ -43,12 +43,12 @@ Base address of team `i`: `m49ersPlayerPointersStart + i × 0x1F4`
 | Offset within block | Size | Field | Notes |
 |---|---|---|---|
 | `+0x000` | 4 × N bytes | Player pointer array | Signed 32-bit LE relative pointers to player records. `N` = number of players on this team |
-| `+0x104` | 4 bytes | S3a nickname pointer | Signed 32-bit LE relative pointer into the S3a team-string section |
+| `+0x104` | 4 bytes | S3a nickname pointer | Signed 32-bit LE relative pointer to this team's S3a string block (Nickname is the first field) |
+| `+0x118` | 1 byte | Stadium index | Index into the S1a stadium list (0–85+). Used to look up stadium name and city |
 | `+0x14C` | 4 bytes | Coach pointer | Signed 32-bit LE relative pointer to this team's coach record |
-| `+0x1C4`² | 1 byte | Stadium index (primary) | Index into the stadium list; maps to S1a stadium entry |
-| `+0x1C8`² | 1 byte | Stadium index (copy) | Duplicate stadium byte kept in sync |
-
-² Exact stadium byte offsets — see `_cTeamStadiumByteOffset` in `gamesave_tool.dart`.
+| `+0x154` | 1 byte | Logo / PBP index | Same numeric value as stadium index for all 32 NFL teams. Also stored as a 2-char decimal UTF-16LE string in S3a field 2 (kept in sync on write) |
+| `+0x156` | 30 bytes | Uniform year data | 15 × uint16 LE — start/end year pairs for each selectable jersey uniform, matching the uniform selection list order |
+| `+0x192` | 1 byte | Default jersey index | 0-based index into this team's jersey selection list. Variable count per team (up to 15 entries for some teams) |
 
 **Free Agents** player pointer list is not stored in a team block; its location is read from `mFreeAgentPlayersPointer` (see Constants).
 
@@ -81,12 +81,43 @@ The string table is 78,896 bytes in both modes. It is subdivided into four conti
 |---|---|---|---|---|---|---|
 | Stadium names | **S1a** | `0x75960` | `0x75C40` | dynamic (to S2 start) | Read-only via tool | UTF-16LE stadium entries. Each entry: short name, city, stadium code (`sNN`), long name. Scanned once at load to build stadium index |
 | Coach strings | **S2** | dynamic¹ | `0x780DE` | `0x14B1` (5,297 B) | Grow/shrink (shift) | 32 coaches × up to 5 strings: FirstName, LastName, Info1, Info2, Info3 (UTF-16LE, null-terminated). Section is **completely full** in the base franchise file — growing any string silently truncates the tail |
-| Team strings | **S3a** | after S2 | after S2 | fixed per file | Same-or-shorter only | 32 teams × 5 fixed-length fields: Nickname, City, Abbreviation, StadiumNum, Conference (UTF-16LE). Shorter writes are right-padded with spaces to preserve length. Growing is rejected with `AddError` |
+| Team strings | **S3a** | after S2 | after S2 | fixed per file | Same-or-shorter only | 32 teams × 5 fixed-length UTF-16LE fields in order: `[0]` Nickname (e.g. "49ers"), `[1]` Abbrev (e.g. "SF"), `[2]` LogoNumStr (2-char decimal matching stadium/logo index, e.g. "25"), `[3]` City (e.g. "San Francisco"), `[4]` AbbrAlt (e.g. "SF"). Shorter writes are right-padded with spaces to preserve length. Growing is rejected with `AddError` |
 | Player names | **S3b** | after S3a | after S3a | to `mModifiableNameSectionEnd` | Grow/shrink (shift) | Player first + last names (UTF-16LE, null-terminated). Overflow guard: writes that would exceed `mModifiableNameSectionEnd` are rejected with `AddError` and the name is left unchanged |
 
 ¹ S2 start in Roster mode = destination of coach 0's FirstName pointer (dynamic, computed at load time).
 
 **S2 pointer adjustment:** After any grow/shrink in S2, `AdjustCoachStringPointers()` updates all 32 coaches' 5 string pointers. After any grow/shrink in S3b, `AdjustPlayerNamePointers()` updates all player first/last-name pointers.
+
+---
+
+## Playbook Table
+
+An absolute table of 32 × 8-byte entries, one per team in the same order as the team blocks.
+
+| Mode | Base address |
+|---|---|
+| Roster | `0x29B0` |
+| Franchise | `0x2C90` |
+
+Each entry is two consecutive 4-byte signed relative string pointers:
+
+| Offset within entry | Size | Field | Resolves to |
+|---|---|---|---|
+| `+0x0` | 4 bytes | Offense pointer | Full playbook name string, e.g. `"49ers"`, `"West Coast"` |
+| `+0x4` | 4 bytes | Defense pointer | Short playbook abbreviation string, e.g. `"SF"`, `"WCO"` |
+
+Both pointers use the standard formula: `destination = pointerLocation + signedValue − 1`.
+
+The playbook name strings are stored consecutively in the string table immediately after the S1a stadium block. The 32 team-named playbooks are followed by 4 generic entries:
+
+| Token | Offense name | Defense abbrev |
+|---|---|---|
+| `PB_West_Coast` | `West Coast` | `WCO` |
+| `PB_General` | `General` | `GEN` |
+| `PB_User_A` | `User A` | `UA` |
+| `PB_User_B` | `User B` | `UB` |
+
+**Stored pointer values differ per team slot** even when multiple teams share the same playbook, because the pointer is relative to each slot's own address. The tool builds a name→address lookup at load time by walking the string table from team 0's offense pointer address.
 
 ---
 
@@ -133,6 +164,10 @@ Pointed to by the coach pointer in each team block.
 | `mCoachPointerOffset` | `0x14C` | `0x14C` | Offset within team block to coach pointer |
 | `_cTeamDiff` | `0x1F4` | `0x1F4` | Stride between consecutive team blocks |
 | `_cTeamDataPtrOffset` | `0x104` | `0x104` | Offset within team block to S3a nickname pointer |
+| `_cTeamStadiumByteOffset` | `0x118` | `0x118` | Offset within team block to stadium index byte |
+| `_cTeamLogoByteOffset` | `0x154` | `0x154` | Offset within team block to logo/PBP index byte (= stadium index for all NFL teams; also stored in S3a[2]) |
+| `_cTeamDefaultJerseyOffset` | `0x192` | `0x192` | Offset within team block to default jersey index byte |
+| `_cPlaybookTableBase` | `0x29B0` | `0x2C90` | Base of playbook pointer table (absolute); stride 8 bytes per team |
 | `mFreeAgentPlayersPointer` | `0x007C` | `0x035C` | Address of free-agent player-list pointer |
 | `mFreeAgentCountLocation` | `0x0078` | `0x0358` | Address of free-agent player count |
 | `mPlayerStart` | `0x0AFA8`¹ | `0x0B288` | Address of first player record |

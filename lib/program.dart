@@ -37,6 +37,9 @@ class Program {
     bool showCoachesAll = false;
     bool showTeamData = false;
     bool showStadiumNames = false;
+    bool showPlaybookNames = false;
+    bool showJerseyNames = false;
+    int  showJerseyNamesTeam = -1; // -1 = all 32 teams
 
     // Argument processing
     for (int i = 0; i < args.length; i++) {
@@ -56,7 +59,11 @@ class Program {
         case '-coach': showCoaches = true; break;
         case '-coach_all': showCoachesAll = true; break;
         case '-teams': showTeamData = true; break;
-        case '-show_stadium_names': showStadiumNames = true; break;
+        case '-show_stadium_names':  showStadiumNames = true; break;
+        case '-show_playbook_names': showPlaybookNames = true; break;
+        case '-show_jersey_names':
+          showJerseyNames = true;
+          break;
         case '-help':
         case '--help':
         case '/help':
@@ -82,7 +89,14 @@ class Program {
             coachKey = args[i].substring(10);
           else if (args[i].startsWith('-TeamDataKey:'))
             teamDataKey = args[i].substring(13);
-          else
+          else if (args[i].toLowerCase().startsWith('-show_jersey_names:')) {
+            showJerseyNames = true;
+            final teamName = args[i].substring('-show_jersey_names:'.length);
+            showJerseyNamesTeam = GamesaveTool.sTeamsDataOrder
+                .indexWhere((t) => t.toLowerCase() == teamName.toLowerCase());
+            if (showJerseyNamesTeam < 0)
+              Logger.error('Unknown team name for -show_jersey_names: "$teamName"');
+          } else
             Logger.error('Argument not applied: ${args[i]}');
           break;
       }
@@ -246,6 +260,20 @@ class Program {
         builder.write(tool.GetTeamDataAll());
       if (showStadiumNames)
         builder.write(tool.GetStadiumNamesList());
+      if (showPlaybookNames)
+        builder.write(tool.GetPlaybookNamesList());
+      if (showJerseyNames) {
+        if (showJerseyNamesTeam >= 0) {
+          builder.write('\nJersey options for ${GamesaveTool.sTeamsDataOrder[showJerseyNamesTeam]}:\n');
+          builder.write(tool.GetJerseyNamesList(showJerseyNamesTeam));
+        } else {
+          builder.write('\nJersey options (all teams):\n');
+          for (int t = 0; t < 32; t++) {
+            builder.write('${GamesaveTool.sTeamsDataOrder[t]}:\n');
+            builder.write(tool.GetJerseyNamesList(t));
+          }
+        }
+      }
       if (showSchedule && tool.saveType == SaveType.Franchise)
         builder.write(tool.GetSchedule());
 
@@ -261,6 +289,7 @@ class Program {
       return;
     }
 
+    StaticUtils.ShowWarnings();
     StaticUtils.ShowErrors();
   }
 
@@ -307,12 +336,18 @@ The following are the available options.
 -dc             Print draft class
 -coach          Print coaches (uses current CoachKey)
 -coach_all      Print all coach attributes (overrides CoachKey with full field set)
--teams          Print team metadata (nickname, city, stadium, etc.)
--show_stadium_names  Print all available stadium names (for use with [brackets])
+-teams          Print team metadata (nickname, city, stadium, logo, playbooks, jersey, etc.)
+-show_stadium_names       Print all available stadium names (for use with [brackets])
+-show_playbook_names      Print all available playbook names (for use with Playbook field)
+-show_jersey_names        Print all jersey options for all 32 teams
+-show_jersey_names:<team> Print jersey options for a single team (e.g. -show_jersey_names:49ers)
 -stdin          Read data from standard in.
 -Key:<key>      Specify key
 -CoachKey:<key> Specify Coach Key
 -TeamDataKey:<key> Specify Team Data Key
+                  Available TeamData fields: Nickname, Abbrev, Stadium, City, AbbrAlt,
+                  Logo, Playbook, DefaultJersey
+                  Playbook values: PB_49ers, PB_Bears, PB_West_Coast, PB_General, etc.
 -out:filename   Save modified Save file to <filename>.
 -help           Show this help message.
 ''');
