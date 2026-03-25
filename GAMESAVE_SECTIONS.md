@@ -110,7 +110,7 @@ Both pointers use the standard formula: `destination = pointerLocation + signedV
 
 The playbook name strings are stored consecutively in the string table immediately after the S1a stadium block. The 32 team-named playbooks are followed by 4 generic entries:
 
-| Token | Offense name | Defense abbrev |
+| Token | Offense name | Abbrev |
 |---|---|---|
 | `PB_West_Coast` | `West Coast` | `WCO` |
 | `PB_General` | `General` | `GEN` |

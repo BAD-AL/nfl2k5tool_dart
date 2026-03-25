@@ -329,23 +329,20 @@ class GamesaveTool {
       String key = CoachKey.toLowerCase().replaceAll('fname', 'FirstName').replaceAll('lname', 'LastName');
       List<String> parts = key.split(',');
       for (String part in parts) {
-        if (!'Coach,Team'.toLowerCase().contains(part.toLowerCase()) || part.isEmpty) {
-          if (part.isEmpty) continue;
-          if ('coach,team'.contains(part.toLowerCase())) continue;
-          try {
-            CoachOffsets attr = CoachOffsets.values
-                .firstWhere((e) => e.name.toLowerCase() == part.toLowerCase());
-            if ('body'.toLowerCase() == part.toLowerCase()) {
-              builder.write('[');
-              builder.write(GetCoachAttribute(teamIndex, attr));
-              builder.write('],');
-            } else {
-              builder.write(GetCoachAttribute(teamIndex, attr));
-              builder.write(',');
-            }
-          } catch (e) {
-            // skip unknown parts
+        if (part.isEmpty || part == 'coach' || part == 'team') continue;
+        try {
+          CoachOffsets attr = CoachOffsets.values
+              .firstWhere((e) => e.name.toLowerCase() == part.toLowerCase());
+          if ('body'.toLowerCase() == part.toLowerCase()) {
+            builder.write('[');
+            builder.write(GetCoachAttribute(teamIndex, attr));
+            builder.write('],');
+          } else {
+            builder.write(GetCoachAttribute(teamIndex, attr));
+            builder.write(',');
           }
+        } catch (e) {
+          // skip unknown parts
         }
       }
       String built = builder.toString();

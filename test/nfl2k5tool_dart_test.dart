@@ -801,19 +801,19 @@ void main() {
       });
     });
 
-    // T-C13 — Shared-offset playcalling fields — documents Issue C
-    test('T-C13 ShotgunRun and IFormRun share offset 0x83 — documents Issue C', () {
+    // T-C13 — Playcalling fields have independent offsets (Issue C fixed)
+    test('T-C13 ShotgunRun and IFormRun are independent (offset bug fixed)', () {
       tool.SetCoachAttribute(0, CoachOffsets.ShotgunRun, '99');
-      // Issue C — intentional shared offset: both names read same byte
+      tool.SetCoachAttribute(0, CoachOffsets.IFormRun, '11');
       expect(tool.GetCoachAttribute(0, CoachOffsets.ShotgunRun), equals('99'));
-      expect(tool.GetCoachAttribute(0, CoachOffsets.IFormRun), equals('99'));
+      expect(tool.GetCoachAttribute(0, CoachOffsets.IFormRun), equals('11'));
     });
 
-    test('T-C13 SplitbackRun and EmptyRun share offset 0x87 — documents Issue C', () {
+    test('T-C13 SplitbackRun and EmptyRun are independent (offset bug fixed)', () {
       tool.SetCoachAttribute(0, CoachOffsets.SplitbackRun, '77');
-      // Issue C — intentional shared offset
+      tool.SetCoachAttribute(0, CoachOffsets.EmptyRun, '33');
       expect(tool.GetCoachAttribute(0, CoachOffsets.SplitbackRun), equals('77'));
-      expect(tool.GetCoachAttribute(0, CoachOffsets.EmptyRun), equals('77'));
+      expect(tool.GetCoachAttribute(0, CoachOffsets.EmptyRun), equals('33'));
     });
 
     // T-C14 — InputParser non-string fields round-trip
@@ -845,6 +845,388 @@ void main() {
       expect(reloaded.GetCoachAttribute(0, CoachOffsets.Wins), equals('12'));
 
       File(tempPath).deleteSync();
+    });
+  });
+
+  // T-C15 — Ground-truth coach values (Base2004Fran_Orig.zip)
+  //
+  // Manually gathered expected values for every numeric coach field for two
+  // coaches: Dennis Erickson (49ers, idx 0) and Tony Dungy (Colts, idx 10).
+  // Exercises all playcalling fields whose offsets were fixed in Issue C
+  // (SplitbackRun 0x84, IFormRun 0x85 — were both wrongly set to 0x83/0x87).
+  group('T-C15 – Ground-truth coach values – Base2004Fran_Orig.zip', () {
+    late GamesaveTool tool;
+
+    setUpAll(() {
+      tool = GamesaveTool();
+      final ok = tool.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+      expect(ok, isTrue, reason: 'Base2004Fran_Orig.zip must load successfully');
+      tool.CoachKey = tool.CoachKeyAll;
+    });
+
+    // Convenience: team index 0 is always 49ers.
+    const int niners = 0;
+
+    test('Wins = 38', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Wins), equals('38'));
+    });
+
+    test('Losses = 42', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Losses), equals('42'));
+    });
+
+    test('Ties = 0', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Ties), equals('0'));
+    });
+
+    test('SeasonsWithTeam = 1', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.SeasonsWithTeam), equals('1'));
+    });
+
+    test('totalSeasons = 5', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.totalSeasons), equals('5'));
+    });
+
+    test('WinningSeasons = 0', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.WinningSeasons), equals('0'));
+    });
+
+    test('SuperBowls = 0', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.SuperBowls), equals('0'));
+    });
+
+    test('SuperBowlWins = 0', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.SuperBowlWins), equals('0'));
+    });
+
+    test('SuperBowlLosses = 0', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.SuperBowlLosses), equals('0'));
+    });
+
+    test('PlayoffWins = 0', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.PlayoffWins), equals('0'));
+    });
+
+    test('PlayoffLosses = 0', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.PlayoffLosses), equals('0'));
+    });
+
+    test('Overall = 60', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Overall), equals('60'));
+    });
+
+    test('OvrallOffense = 69', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.OvrallOffense), equals('69'));
+    });
+
+    test('RushFor = 61', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.RushFor), equals('61'));
+    });
+
+    test('PassFor = 76', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.PassFor), equals('76'));
+    });
+
+    test('OverallDefense = 69', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.OverallDefense), equals('69'));
+    });
+
+    test('PassRush = 69', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.PassRush), equals('69'));
+    });
+
+    test('PassCoverage = 76', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.PassCoverage), equals('76'));
+    });
+
+    test('QB = 72', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.QB), equals('72'));
+    });
+
+    test('RB = 76', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.RB), equals('76'));
+    });
+
+    test('TE = 75', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.TE), equals('75'));
+    });
+
+    test('WR = 74', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.WR), equals('74'));
+    });
+
+    test('OL = 68', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.OL), equals('68'));
+    });
+
+    test('DL = 77', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.DL), equals('77'));
+    });
+
+    test('LB = 80', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.LB), equals('80'));
+    });
+
+    test('SpecialTeams = 76', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.SpecialTeams), equals('76'));
+    });
+
+    test('Professionalism = 84', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Professionalism), equals('84'));
+    });
+
+    test('Preparation = 83', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Preparation), equals('83'));
+    });
+
+    test('Conditioning = 76', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Conditioning), equals('76'));
+    });
+
+    test('Motivation = 75', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Motivation), equals('75'));
+    });
+
+    test('Leadership = 76', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Leadership), equals('76'));
+    });
+
+    test('Discipline = 69', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Discipline), equals('69'));
+    });
+
+    test('Respect = 70', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.Respect), equals('70'));
+    });
+
+    test('PlaycallingRun = 45', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.PlaycallingRun), equals('45'));
+    });
+
+    // The following two pairs share enum offsets (Issue C / potential bug):
+    // ShotgunRun and IFormRun both map to 0x83 — expected values differ (15 vs 14).
+    // If these fail it confirms the offsets in CoachOffsets are wrong.
+    test('ShotgunRun = 15', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.ShotgunRun), equals('15'));
+    });
+
+    test('IFormRun = 14', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.IFormRun), equals('14'));
+    });
+
+    // SplitbackRun and EmptyRun both map to 0x87 — expected values differ (10 vs 9).
+    test('SplitbackRun = 10', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.SplitbackRun), equals('10'));
+    });
+
+    test('EmptyRun = 9', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.EmptyRun), equals('9'));
+    });
+
+    test('ShotgunPass = 3', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.ShotgunPass), equals('3'));
+    });
+
+    test('SplitbackPass = 12', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.SplitbackPass), equals('12'));
+    });
+
+    test('IFormPass = 40', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.IFormPass), equals('40'));
+    });
+
+    test('LoneBackPass = 38', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.LoneBackPass), equals('38'));
+    });
+
+    test('EmptyPass = 7', () {
+      expect(tool.GetCoachAttribute(niners, CoachOffsets.EmptyPass), equals('7'));
+    });
+  });
+
+  // T-C16 — Tony Dungy (Colts, idx 10) ground-truth values – Base2004Fran_Orig.zip
+  group('T-C16 – Tony Dungy (Colts) ground-truth values – Base2004Fran_Orig.zip', () {
+    late GamesaveTool tool;
+
+    setUpAll(() {
+      tool = GamesaveTool();
+      final ok = tool.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+      expect(ok, isTrue, reason: 'Base2004Fran_Orig.zip must load successfully');
+      tool.CoachKey = tool.CoachKeyAll;
+    });
+
+    const int colts = 10;
+
+    test('Wins = 76', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Wins), equals('76'));
+    });
+
+    test('Losses = 52', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Losses), equals('52'));
+    });
+
+    test('Ties = 0', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Ties), equals('0'));
+    });
+
+    test('SeasonsWithTeam = 2', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.SeasonsWithTeam), equals('2'));
+    });
+
+    test('totalSeasons = 8', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.totalSeasons), equals('8'));
+    });
+
+    test('WinningSeasons = 6', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.WinningSeasons), equals('6'));
+    });
+
+    test('SuperBowls = 0', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.SuperBowls), equals('0'));
+    });
+
+    test('SuperBowlWins = 0', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.SuperBowlWins), equals('0'));
+    });
+
+    test('SuperBowlLosses = 0', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.SuperBowlLosses), equals('0'));
+    });
+
+    test('PlayoffWins = 4', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.PlayoffWins), equals('4'));
+    });
+
+    test('PlayoffLosses = 6', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.PlayoffLosses), equals('6'));
+    });
+
+    test('Overall = 84', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Overall), equals('84'));
+    });
+
+    test('OvrallOffense = 89', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.OvrallOffense), equals('89'));
+    });
+
+    test('RushFor = 84', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.RushFor), equals('84'));
+    });
+
+    test('PassFor = 97', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.PassFor), equals('97'));
+    });
+
+    test('OverallDefense = 88', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.OverallDefense), equals('88'));
+    });
+
+    test('PassRush = 83', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.PassRush), equals('83'));
+    });
+
+    test('PassCoverage = 80', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.PassCoverage), equals('80'));
+    });
+
+    test('QB = 91', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.QB), equals('91'));
+    });
+
+    test('RB = 84', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.RB), equals('84'));
+    });
+
+    test('TE = 84', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.TE), equals('84'));
+    });
+
+    test('WR = 91', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.WR), equals('91'));
+    });
+
+    test('OL = 84', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.OL), equals('84'));
+    });
+
+    test('DL = 77', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.DL), equals('77'));
+    });
+
+    test('LB = 82', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.LB), equals('82'));
+    });
+
+    test('SpecialTeams = 62', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.SpecialTeams), equals('62'));
+    });
+
+    test('Professionalism = 92', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Professionalism), equals('92'));
+    });
+
+    test('Preparation = 92', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Preparation), equals('92'));
+    });
+
+    test('Conditioning = 91', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Conditioning), equals('91'));
+    });
+
+    test('Motivation = 83', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Motivation), equals('83'));
+    });
+
+    test('Leadership = 84', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Leadership), equals('84'));
+    });
+
+    test('Discipline = 83', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Discipline), equals('83'));
+    });
+
+    test('Respect = 91', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.Respect), equals('91'));
+    });
+
+    test('PlaycallingRun = 40', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.PlaycallingRun), equals('40'));
+    });
+
+    test('ShotgunRun = 40', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.ShotgunRun), equals('40'));
+    });
+
+    test('IFormRun = 1', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.IFormRun), equals('1'));
+    });
+
+    test('SplitbackRun = 12', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.SplitbackRun), equals('12'));
+    });
+
+    test('EmptyRun = 1', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.EmptyRun), equals('1'));
+    });
+
+    test('ShotgunPass = 40', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.ShotgunPass), equals('40'));
+    });
+
+    test('SplitbackPass = 5', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.SplitbackPass), equals('5'));
+    });
+
+    test('IFormPass = 7', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.IFormPass), equals('7'));
+    });
+
+    test('LoneBackPass = 37', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.LoneBackPass), equals('37'));
+    });
+
+    test('EmptyPass = 11', () {
+      expect(tool.GetCoachAttribute(colts, CoachOffsets.EmptyPass), equals('11'));
     });
   });
 
