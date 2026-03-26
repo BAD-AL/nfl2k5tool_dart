@@ -175,6 +175,8 @@ class StaticUtils {
   // #endregion
 
   // #region save signing
+  // extracted using Extracted using:
+  // https://github.com/PMStanley/xbox-save-sig/blob/master/xboxsig.py 
   // "722E7565FB841B09E938DA756393FF80"
   static final List<int> _mNFL2K5Key = [
     0x72, 0x2E, 0x75, 0x65, 0xFB, 0x84, 0x1B, 0x09,
