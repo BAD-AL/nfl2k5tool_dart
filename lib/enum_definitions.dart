@@ -134,7 +134,8 @@ enum Hand { Left, Right }
 
 enum Face {
   Face1, Face2, Face3, Face4, Face5, Face6, Face7, Face8,
-  Face9, Face10, Face11, Face12, Face13, Face14, Face15
+  Face9, Face10, Face11, Face12, Face13, Face14, Face15,
+  Face16, Face17, Face18, Face19, Face20, Face21, Face22, Face23
 }
 
 enum FaceMask {

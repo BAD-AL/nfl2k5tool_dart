@@ -1670,8 +1670,8 @@ class GamesaveTool {
         SetByte(loc, style.value);
         break;
       case PlayerOffsets.Face:
-        Face f = Face.values.firstWhere((e) => e.name == stringVal);
-        SetByte(loc, f.index);
+        final faceNumeric = int.tryParse(stringVal);
+        SetByte(loc, faceNumeric ?? Face.values.firstWhere((e) => e.name == stringVal).index);
         break;
       case PlayerOffsets.JerseyNumber:
         val = int.parse(stringVal);
@@ -2152,8 +2152,8 @@ class GamesaveTool {
 
   void SetFace(int player, String val) {
     int loc = GetPlayerDataStart(player) + PlayerOffsets.Face.value;
-    Face ret = Face.values.firstWhere((e) => e.name == val);
-    int dude = ret.index;
+    final numeric = int.tryParse(val);
+    int dude = numeric ?? Face.values.firstWhere((e) => e.name == val).index;
     int b = GameSaveData![loc];
     b &= 0x01;
     b += dude << 1;
