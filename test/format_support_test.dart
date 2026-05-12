@@ -9,7 +9,7 @@ import 'package:test/test.dart';
 
 void main() {
   final xboxZipPath = 'test/test_files/Base2004Fran_Orig.zip';
-  final xboxDatPath = 'test/test_files/years/BaseRoster/SAVEGAME.DAT';
+  final xboxDatPath = 'test/test_files/BaseRoster/SAVEGAME.DAT';
   final xboxMuPath = 'test/test_files/XEMU_Created_default_roster.bin';
   final ps2MaxPath = 'test/test_files/SLUS-20919 ESPN NFL 2K5 NFL25RW6 (35670D6C).max';
 

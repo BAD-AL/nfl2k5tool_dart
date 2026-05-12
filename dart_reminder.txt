@@ -14,6 +14,7 @@ dart run bin/nfl2k5tool.dart <args>
 
 # Run tests (verbose):
 dart test -r expanded
+ dart test --fail-fast
 
 # Run tests in sequence, not in parallel
 dart test --concurrency=1

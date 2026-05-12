@@ -1319,6 +1319,10 @@ class GamesaveTool {
   void SetYear(String year) {
     try {
       Year = int.parse(year);
+      if (GameSaveData != null && Year > 2000 &&
+          GameSaveData!.length > SchedulerHelper.FranchiseGameOneYearLocation) {
+        GameSaveData![SchedulerHelper.FranchiseGameOneYearLocation] = Year - 2000;
+      }
     } catch (e) {
       StaticUtils.AddError('Error Setting year to:$year');
     }
@@ -1333,7 +1337,21 @@ class GamesaveTool {
   String GetSchedule() {
     SchedulerHelper helper = SchedulerHelper(this);
     helper.FranchiseScheduleMode = true;
+    helper.mYear = Year > 2000 ? Year - 2000 : 4;
     return helper.GetSchedule();
+  }
+
+  /// Sets date and/or time for a specific franchise game.
+  /// [week] is 1-based (week 1 = first regular season week, week 18 = Wild Card).
+  /// [gameOfWeek] is 1-based.
+  void SetGameDateTime(int week, int gameOfWeek,
+      {int? month, int? day, int? hour, int? minute}) {
+    SchedulerHelper helper = SchedulerHelper(this);
+    helper.FranchiseScheduleMode = true;
+    helper.mYear = Year > 2000 ? Year - 2000 : 4;
+    // Convert from 1-based to 0-based.
+    helper.SetGameDateTime(week - 1, gameOfWeek - 1,
+        month: month, day: day, hour: hour, minute: minute);
   }
 
   void SetByte(int loc, int b) {
@@ -2719,7 +2737,12 @@ class GamesaveTool {
     List<int> retVal = [];
     if (formula.isNotEmpty) {
       String evaluationString = '';
-      formula = formula.replaceAll('||', ' or ').replaceAll('&&', ' and ').replaceAll('=', ' = ').replaceAll('!=', ' <> ');
+      formula = formula
+          .replaceAll('||', ' or ')
+          .replaceAll('&&', ' and ')
+          .replaceAll('!=', ' <> ')
+          .replaceAll('>=', ' >= ')
+          .replaceAll('<=', ' <= ');
       while (formula.contains('  '))
         formula = formula.replaceAll('  ', ' ');
 
@@ -2729,7 +2752,7 @@ class GamesaveTool {
         pos = GetAttribute(i, PlayerOffsets.Position);
         if (positions.isEmpty || positions.contains(pos)) {
           evaluationString = SubstituteAttributesForValues(i, formula);
-          evaluationString = SubstituteRandom(formula);
+          evaluationString = SubstituteRandom(evaluationString);
           addMe = _EvaluateExpression(evaluationString);
           if (addMe) retVal.add(i);
         }

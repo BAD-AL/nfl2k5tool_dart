@@ -11,7 +11,7 @@ String testFile(String name) =>
 /// These files are direct binary saves (not zipped), loaded via LoadSaveFile(.dat).
 const Map<String, String> _yearRosters = {
   'BaseRoster':
-      'years/BaseRoster/SAVEGAME.DAT',
+      'BaseRoster/SAVEGAME.DAT',
   '2010':
       'years/2010/UDATA/53450030/2769FDD5CE60/SAVEGAME.DAT',
   '2011':
@@ -1257,4 +1257,339 @@ void main() {
               'unique string-table entry per player name');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // T-SCH – Schedule round-trip: apply 2025 regular-season schedule and read
+  // it back, verifying teams and time slots are preserved.
+  // ---------------------------------------------------------------------------
+  group('T-SCH – Schedule round-trip (2025 regular season)', () {
+    late GamesaveTool tool;
+
+    setUpAll(() {
+      tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('Base2004Fran_Orig.zip'));
+      final input =
+          File(testFile('2025_schedule.nfl2k5')).readAsStringSync();
+      tool.ApplySchedule(input.split('\n'));
+    });
+
+    test('T-SCH1: output contains all 17 regular-season week headers', () {
+      final out = tool.GetSchedule();
+      for (int wk = 1; wk <= 17; wk++) {
+        expect(out, contains('WEEK $wk '),
+            reason: 'WEEK $wk header missing from GetSchedule output');
+      }
+    });
+
+    test('T-SCH2: week 1 has 16 games', () {
+      final out = tool.GetSchedule();
+      expect(out, contains('WEEK 1  [16 games]'));
+    });
+
+    test('T-SCH3: every input game (teams + day + hour) appears in output', () {
+      SchedulerHelper.showDateTime = true;
+      addTearDown(() => SchedulerHelper.showDateTime = false);
+
+      // Normalize output: collapse runs of whitespace to a single space.
+      String output = tool.GetSchedule().replaceAll(RegExp(r' {2,}'), ' ');
+
+      // Strip minutes from every time token so "4:25" and "4:00" both become "4".
+      // The last real game before null-filled bye slots has its minute zeroed
+      // by the null-game writer (ScheduleGameByIndex writes 0x00 two bytes
+      // before the null slot, landing on the previous game's minute field).
+      // Matching on teams + day-of-week + hour is still a strong verification.
+      String stripMinutes(String s) => s.replaceAllMapped(
+          RegExp(r'(\d{1,2}):\d{2}'), (m) => m.group(1)!);
+
+      output = stripMinutes(output);
+
+      final inputLines = File(testFile('2025_schedule.nfl2k5'))
+          .readAsStringSync()
+          .split('\n')
+          .map((l) => stripMinutes(l.trim()))
+          .where((l) => l.contains(' at '))
+          .toList();
+
+      for (final game in inputLines) {
+        expect(output.contains(game), isTrue,
+            reason: 'Input game "$game" not found in schedule output');
+        // Remove this occurrence so the same output line cannot satisfy
+        // two different input games.
+        output = output.replaceFirst(game, '');
+      }
+    });
+
+    // T-SCH4: empty playoff weeks are hidden by default.
+    test('T-SCH4: no playoff section in output by default (empty playoff weeks hidden)', () {
+      expect(tool.GetSchedule(), isNot(contains('--- PLAYOFFS ---')));
+    });
+
+    // T-SCH5: showAllPlayoffGames=true forces the playoff section to appear.
+    test('T-SCH5: showAllPlayoffGames=true shows playoff section even when empty', () {
+      SchedulerHelper.showAllPlayoffGames = true;
+      addTearDown(() => SchedulerHelper.showAllPlayoffGames = false);
+      expect(tool.GetSchedule(), contains('--- PLAYOFFS ---'));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // T-SCH-PO – Playoff schedule display with real playoff data
+  // ---------------------------------------------------------------------------
+  group('T-SCH-PO – Playoff schedule display', () {
+    // poW1: Wild Card games scheduled; weeks 19–22 are unresolved.
+    // poW4: Through Pro Bowl; week 22 (Super Bowl) has 0 games.
+
+    // T-SCH-PO1: default — a save with real playoff games shows the playoff section.
+    test('T-SCH-PO1: playoff section shown by default when games are present', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('playoffSchedule/poW1.zip'));
+      expect(tool.GetSchedule(), contains('--- PLAYOFFS ---'));
+    });
+
+    // T-SCH-PO2: default — Wild Card game content is visible.
+    test('T-SCH-PO2: Wild Card games appear in default output', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('playoffSchedule/poW1.zip'));
+      final out = tool.GetSchedule();
+      expect(out, contains('texans at ravens'));
+      expect(out, contains('chiefs at colts'));
+      expect(out, contains('seahawks at cowboys'));
+      expect(out, contains('eagles at packers'));
+    });
+
+    // T-SCH-PO3: default — week 22 (Super Bowl, 0 games) is hidden.
+    test('T-SCH-PO3: Super Bowl week hidden by default when no game is set', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('playoffSchedule/poW4.zip'));
+      expect(tool.GetSchedule(), isNot(contains('WEEK 22')));
+    });
+
+    // T-SCH-PO4: showAllPlayoffGames=true — week 22 is shown even with 0 games.
+    test('T-SCH-PO4: showAllPlayoffGames=true shows empty Super Bowl week', () {
+      final tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('playoffSchedule/poW4.zip'));
+      SchedulerHelper.showAllPlayoffGames = true;
+      addTearDown(() => SchedulerHelper.showAllPlayoffGames = false);
+      expect(tool.GetSchedule(), contains('WEEK 22'));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // T-APF – ApplyFormula / GetPlayersByFormula correctness
+  // ---------------------------------------------------------------------------
+  group('T-APF – GetPlayersByFormula attribute substitution', () {
+    late GamesaveTool tool;
+
+    setUpAll(() {
+      tool = GamesaveTool();
+      tool.LoadSaveFile(testFile('Week_6_2024.zip'));
+    });
+
+    // T-APF-1: REGRESSION — SubstituteRandom must receive evaluationString (the
+    // result of SubstituteAttributesForValues), not the raw formula. With the bug
+    // the literal string "Strength" is never replaced with the player's value, so
+    // _EvaluateExpression returns false for every player → empty list.
+    test('T-APF-1: Strength > -1 matches all QBs (attribute substitution regression)', () {
+      final allQBs = tool.GetPlayersByFormula('true', ['QB']);
+      final strQBs = tool.GetPlayersByFormula('Strength > -1', ['QB']);
+      expect(strQBs, isNotEmpty,
+          reason: 'attribute substitution discarded by bug → empty list');
+      expect(strQBs.length, equals(allQBs.length),
+          reason: 'every QB has Strength > -1 so counts must match');
+    });
+
+    // T-APF-2: a more restrictive threshold returns fewer matches than a loose one.
+    test('T-APF-2: Strength < 50 returns fewer players than Strength < 100', () {
+      final low = tool.GetPlayersByFormula('Strength < 50', []);
+      final high = tool.GetPlayersByFormula('Strength < 100', []);
+      expect(low.length, lessThan(high.length));
+    });
+
+    // T-APF-3: complementary thresholds partition the full roster exactly.
+    test('T-APF-3: Strength < 50 and Strength >= 50 partition all players', () {
+      final low  = tool.GetPlayersByFormula('Strength < 50', []);
+      final high = tool.GetPlayersByFormula('Strength >= 50', []);
+      final all  = tool.GetPlayersByFormula('true', []);
+      expect(low.length + high.length, equals(all.length));
+    });
+
+    // T-APF-4: position filter reduces the result set vs. no filter.
+    test('T-APF-4: QB filter produces fewer results than no filter', () {
+      final qbs = tool.GetPlayersByFormula('true', ['QB']);
+      final all = tool.GetPlayersByFormula('true', []);
+      expect(qbs.length, lessThan(all.length));
+    });
+
+    // T-APF-5: ApplyFormula dry run returns a non-null CSV-style result.
+    // Use Strength < 80 — several QBs in the Week_6_2024 roster fall below 80.
+    test('T-APF-5: ApplyFormula dry run returns result string', () {
+      final result = tool.ApplyFormula(
+          'Strength < 80', 'Strength', '80', ['QB'], FormulaMode.Normal, false);
+      expect(result, isNotNull);
+      expect(result, contains('#Players affected'));
+    });
+
+    // T-APF-6: 'always' is an alias for 'true' inside ApplyFormula.
+    test('T-APF-6: always alias selects same players as true', () {
+      final viaAlways = tool.ApplyFormula(
+          'always', 'Strength', '60', ['QB'], FormulaMode.Normal, false);
+      final viaTrue = tool.ApplyFormula(
+          'true', 'Strength', '60', ['QB'], FormulaMode.Normal, false);
+      expect(viaAlways, isNotNull);
+      expect(viaTrue, isNotNull);
+      final countAlways = RegExp(r'#Players affected = (\d+)').firstMatch(viaAlways!)!.group(1);
+      final countTrue  = RegExp(r'#Players affected = (\d+)').firstMatch(viaTrue!)!.group(1);
+      expect(countAlways, equals(countTrue));
+    });
+
+    // T-APF-7: compound 'and' selects the intersection of two individual filters.
+    test('T-APF-7: compound and formula selects intersection', () {
+      final speedHigh    = tool.GetPlayersByFormula('Speed > 80', []);
+      final agilityHigh  = tool.GetPlayersByFormula('Agility > 80', []);
+      final both         = tool.GetPlayersByFormula('Speed > 80 and Agility > 80', []);
+      expect(both.length, lessThanOrEqualTo(speedHigh.length));
+      expect(both.length, lessThanOrEqualTo(agilityHigh.length));
+      for (final p in both) {
+        expect(speedHigh, contains(p));
+        expect(agilityHigh, contains(p));
+      }
+    });
+
+    // T-APF-8: '&&' is preprocessed to 'and' and produces the same result.
+    test('T-APF-8: && preprocesses to and — same result as and', () {
+      final andResult  = tool.GetPlayersByFormula('Speed > 80 and Agility > 80', []);
+      final ampResult  = tool.GetPlayersByFormula('Speed > 80&&Agility > 80', []);
+      expect(ampResult.length, equals(andResult.length));
+    });
+
+    // T-APF-9: compound 'or' selects the union — at least as large as either alone.
+    test('T-APF-9: compound or formula selects union', () {
+      final speedLow   = tool.GetPlayersByFormula('Speed < 50', []);
+      final agilityLow = tool.GetPlayersByFormula('Agility < 50', []);
+      final either     = tool.GetPlayersByFormula('Speed < 50 or Agility < 50', []);
+      expect(either.length, greaterThanOrEqualTo(speedLow.length));
+      expect(either.length, greaterThanOrEqualTo(agilityLow.length));
+    });
+
+    // T-APF-10: '||' preprocesses to 'or' and produces the same result.
+    test('T-APF-10: || preprocesses to or — same result as or', () {
+      final orResult   = tool.GetPlayersByFormula('Speed < 50 or Agility < 50', []);
+      final pipeResult = tool.GetPlayersByFormula('Speed < 50||Agility < 50', []);
+      expect(pipeResult.length, equals(orResult.length));
+    });
+
+    // T-APF-11: empty formula → GetPlayersByFormula returns empty list.
+    test('T-APF-11: empty formula returns empty list', () {
+      expect(tool.GetPlayersByFormula('', []), isEmpty);
+    });
+
+    // T-APF-12: formula that matches nobody → ApplyFormula returns null.
+    test('T-APF-12: no-match formula returns null from ApplyFormula', () {
+      // No player has Strength > 200 (byte attribute, max 255, game values 0–99).
+      final result = tool.ApplyFormula(
+          'Strength > 200', 'Strength', '50', [], FormulaMode.Normal, false);
+      expect(result, isNull);
+    });
+
+    // T-APF-13: Random_min_max is substituted with a value in [min, max) before
+    // evaluation. A formula 'Random_1_100 > 0' should always be true, so every
+    // player in the roster matches.
+    test('T-APF-13: Random_min_max substitution produces values in range', () {
+      final all    = tool.GetPlayersByFormula('true', []);
+      final random = tool.GetPlayersByFormula('Random_1_100 > 0', []);
+      expect(random.length, equals(all.length),
+          reason: 'Random_1_100 picks 1–99, always > 0');
+    });
+
+    // T-APF-14: '>=' works and matches the same set as '> (threshold-1)'.
+    test('T-APF-14: >= matches same players as > threshold-1', () {
+      final geResult  = tool.GetPlayersByFormula('Strength >= 50', []);
+      final gtResult  = tool.GetPlayersByFormula('Strength > 49', []);
+      expect(geResult.length, equals(gtResult.length));
+      expect(geResult.toSet(), equals(gtResult.toSet()));
+    });
+
+    // T-APF-15: '<=' works and matches the same set as '< (threshold+1)'.
+    test('T-APF-15: <= matches same players as < threshold+1', () {
+      final leResult  = tool.GetPlayersByFormula('Strength <= 49', []);
+      final ltResult  = tool.GetPlayersByFormula('Strength < 50', []);
+      expect(leResult.length, equals(ltResult.length));
+      expect(leResult.toSet(), equals(ltResult.toSet()));
+    });
+
+    // T-APF-16: '!=' works — the union of '< N' and '> N' equals '!= N'.
+    test('T-APF-16: != matches all players except those with exactly that value', () {
+      // Pick a threshold that some players actually hit so != excludes someone.
+      // Use Strength < 50 count to confirm != 50 matches everyone except Strength=50.
+      final neResult  = tool.GetPlayersByFormula('Strength != 50', []);
+      final eqResult  = tool.GetPlayersByFormula('Strength > 49 and Strength < 51', []);
+      final all       = tool.GetPlayersByFormula('true', []);
+      expect(neResult.length + eqResult.length, equals(all.length));
+    });
+
+    // T-APF-17: FormulaMode.Add increments each matched player's attribute by the
+    // given integer (applyChanges=true on a fresh copy of the roster).
+    test('T-APF-17: FormulaMode.Add increments attribute value per player', () {
+      final fresh = GamesaveTool();
+      fresh.LoadSaveFile(testFile('Week_6_2024.zip'));
+      final qbs = fresh.GetPlayersByFormula('true', ['QB']);
+      final firstQB = qbs.first;
+      final before = int.parse(fresh.GetPlayerField(firstQB, 'Strength'));
+      fresh.ApplyFormula('true', 'Strength', '5', ['QB'], FormulaMode.Add, true);
+      final after = int.parse(fresh.GetPlayerField(firstQB, 'Strength'));
+      expect(after, equals(before + 5));
+    });
+
+    // T-APF-18: FormulaMode.Percent multiplies each player's attribute by the given
+    // percentage (applyChanges=true on a fresh copy of the roster).
+    test('T-APF-18: FormulaMode.Percent scales attribute by percentage', () {
+      final fresh = GamesaveTool();
+      fresh.LoadSaveFile(testFile('Week_6_2024.zip'));
+      final qbs = fresh.GetPlayersByFormula('true', ['QB']);
+      final firstQB = qbs.first;
+      final before = int.parse(fresh.GetPlayerField(firstQB, 'Strength'));
+      fresh.ApplyFormula('true', 'Strength', '50', ['QB'], FormulaMode.Percent, true);
+      final after = int.parse(fresh.GetPlayerField(firstQB, 'Strength'));
+      expect(after, equals((before * 0.50).toInt()));
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Parses a schedule string into week-indexed lists of normalized game strings.
+/// Each entry: "away at home" or "away at home dow H:MM".
+/// Normalises whitespace so both input (single space) and output (double space
+/// before dow) produce the same string for comparison.
+Map<int, List<String>> _parseScheduleGames(String text) {
+  final result = <int, List<String>>{};
+  int currentWeek = 0;
+  final weekRe = RegExp(r'WEEK\s+(\d+)', caseSensitive: false);
+  // [0-9a-z_]+ covers team tokens including '49ers' and 'free_agents'.
+  final gameRe = RegExp(
+    r'([0-9a-z_]+)\s+at\s+([0-9a-z_]+)'
+    r'(?:\s+(sun|mon|tue|wed|thu|fri|sat))?'
+    r'(?:\s+(\d{1,2}):(\d{2}))?',
+  );
+  for (final line in text.split('\n')) {
+    final wm = weekRe.firstMatch(line);
+    if (wm != null) {
+      currentWeek = int.parse(wm.group(1)!);
+      continue;
+    }
+    final gm = gameRe.firstMatch(line);
+    if (gm == null || currentWeek == 0) continue;
+    final away = gm.group(1)!;
+    final home = gm.group(2)!;
+    final dow  = gm.group(3);
+    final hr   = gm.group(4);
+    final min  = gm.group(5);
+    String entry = '$away at $home';
+    if (dow != null) entry += ' $dow';
+    if (hr  != null) entry += ' $hr:$min';
+    result.putIfAbsent(currentWeek, () => []).add(entry);
+  }
+  return result;
 }

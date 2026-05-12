@@ -16,7 +16,7 @@ import 'package:test/test.dart';
 String testFile(String name) =>
     '${Directory.current.path}/test/test_files/$name';
 
-const String _baseRoster = 'years/BaseRoster/SAVEGAME.DAT';
+const String _baseRoster = 'BaseRoster/SAVEGAME.DAT';
 const String _franchise  = 'Base2004Fran_Orig.zip';
 
 /// Snapshot [count] bytes starting at [start] from [tool]'s GameSaveData.

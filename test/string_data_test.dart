@@ -7,7 +7,7 @@ String testFile(String name) =>
     '${Directory.current.path}/test/test_files/$name';
 
 const String _franchise = 'Base2004Fran_Orig.zip';
-const String _baseRoster = 'years/BaseRoster/SAVEGAME.DAT';
+const String _baseRoster = 'BaseRoster/SAVEGAME.DAT';
 
 void main() {
   // ─── T-S1–T-S8: S2 coach strings (franchise save) ───────────────────────────

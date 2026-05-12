@@ -10,6 +10,7 @@ import 'input_parser.dart';
 import 'enum_definitions.dart';
 import 'static_utils.dart';
 import 'logger.dart';
+import 'scheduler_helper.dart';
 
 class Program {
   static String get Version => '1.0.0';
@@ -41,6 +42,9 @@ class Program {
     bool showJerseyNames = false;
     int  showJerseyNamesTeam = -1; // -1 = all 32 teams
 
+    // Pending game date/time edits: (week1based, game1based, month?, day?, hour?, minute?)
+    final List<(int, int, int?, int?, int?, int?)> pendingGameEdits = [];
+
     // Argument processing
     for (int i = 0; i < args.length; i++) {
       String arg = args[i].toLowerCase();
@@ -48,7 +52,9 @@ class Program {
         case '-app':  showAppearance = true; break;
         case '-st':   showSpecialteams = true; break;
         case '-ab':   showAbilities = true; break;
-        case '-sch':  showSchedule = true; break;
+        case '-sch':          showSchedule = true; break;
+        case '-schtime':      showSchedule = true; SchedulerHelper.showDateTime = true; break;
+        case '-sch_playoffs': showSchedule = true; SchedulerHelper.showAllPlayoffGames = true; break;
         case '-stdin': readFromStdIn = true; break;
         case '-pb':   /* playbooks not yet implemented */ break;
         case '-audc': autoUpdateDepthChart = true; break;
@@ -96,6 +102,26 @@ class Program {
                 .indexWhere((t) => t.toLowerCase() == teamName.toLowerCase());
             if (showJerseyNamesTeam < 0)
               Logger.error('Unknown team name for -show_jersey_names: "$teamName"');
+          } else if (args[i].toLowerCase().startsWith('-setgametime:')) {
+            // Syntax: -setgametime:<week>.<game>.<H>:<MM>
+            // Week and game are 1-based. Example: -setgametime:18.1.4:15
+            final spec = args[i].substring('-setgametime:'.length);
+            final parsed = _parseGameTimeSpec(spec);
+            if (parsed != null) {
+              pendingGameEdits.add((parsed.$1, parsed.$2, null, null, parsed.$3, parsed.$4));
+            } else {
+              Logger.error('Invalid -setgametime format: "${args[i]}". Expected -setgametime:<week>.<game>.<H>:<MM>');
+            }
+          } else if (args[i].toLowerCase().startsWith('-setgamedate:')) {
+            // Syntax: -setgamedate:<week>.<game>.<MM>/<DD>
+            // Week and game are 1-based. Example: -setgamedate:18.1.1/11
+            final spec = args[i].substring('-setgamedate:'.length);
+            final parsed = _parseGameDateSpec(spec);
+            if (parsed != null) {
+              pendingGameEdits.add((parsed.$1, parsed.$2, parsed.$3, parsed.$4, null, null));
+            } else {
+              Logger.error('Invalid -setgamedate format: "${args[i]}". Expected -setgamedate:<week>.<game>.<MM>/<DD>');
+            }
           } else
             Logger.error('Argument not applied: ${args[i]}');
           break;
@@ -183,6 +209,10 @@ class Program {
         stderr.writeln('You must specify a valid save file name in order to save data.');
         _PrintUsage();
         return;
+      }
+
+      for (final (w, g, mo, dy, hr, mi) in pendingGameEdits) {
+        tool.SetGameDateTime(w, g, month: mo, day: dy, hour: hr, minute: mi);
       }
 
       if (autoUpdateDepthChart)
@@ -293,6 +323,40 @@ class Program {
     StaticUtils.ShowErrors();
   }
 
+  /// Parses "-setgametime" spec "week.game.H:MM" → (week, game, hour, minute) or null.
+  static (int, int, int, int)? _parseGameTimeSpec(String spec) {
+    try {
+      final dotParts = spec.split('.');
+      if (dotParts.length < 3) return null;
+      final week = int.parse(dotParts[0]);
+      final game = int.parse(dotParts[1]);
+      final timeParts = dotParts[2].split(':');
+      if (timeParts.length < 2) return null;
+      final hour   = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+      return (week, game, hour, minute);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Parses "-setgamedate" spec "week.game.MM/DD" → (week, game, month, day) or null.
+  static (int, int, int, int)? _parseGameDateSpec(String spec) {
+    try {
+      final dotParts = spec.split('.');
+      if (dotParts.length < 3) return null;
+      final week = int.parse(dotParts[0]);
+      final game = int.parse(dotParts[1]);
+      final dateParts = dotParts[2].split('/');
+      if (dateParts.length < 2) return null;
+      final month = int.parse(dateParts[0]);
+      final day   = int.parse(dateParts[1]);
+      return (week, game, month, day);
+    } catch (_) {
+      return null;
+    }
+  }
+
   static void _PrintUsage() {
     Logger.log('''NFL2K5Tool Version $Version
 
@@ -332,6 +396,16 @@ The following are the available options.
 -aupbp          Auto update the play by play info for each player.
 -auph           Auto update the photo for each player.
 -sch            Print schedule.
+-schtime        Print schedule with day-of-week and time for each game.
+-sch_playoffs   Print schedule including empty playoff weeks (default hides them).
+-setgametime:<week>.<game>.<H>:<MM>
+                Set kickoff time for a specific game. Week/game are 1-based.
+                Example: -setgametime:18.1.4:15  (Wild Card game 1 → 4:15 PM)
+-setgamedate:<week>.<game>.<MM>/<DD>
+                Set calendar date for a specific game. Week/game are 1-based.
+                Example: -setgamedate:18.2.1/11  (Wild Card game 2 → Jan 11)
+                Playoff weeks: 18=Wild Card, 19=Divisional, 20=Championship,
+                               21=Pro Bowl, 22=Super Bowl
 -fa             Print Free Agents
 -dc             Print draft class
 -coach          Print coaches (uses current CoachKey)

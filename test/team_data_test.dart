@@ -20,7 +20,7 @@ String runCapture(List<String> args) {
 String testFile(String name) =>
     '${Directory.current.path}/test/test_files/$name';
 
-const String _baseRoster = 'years/BaseRoster/SAVEGAME.DAT';
+const String _baseRoster = 'BaseRoster/SAVEGAME.DAT';
 
 // Roster-mode team-block base addresses (m49ersPlayerPointersStart = 0x41C8,
 // _cTeamDiff = 0x1F4):
