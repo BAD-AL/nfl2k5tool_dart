@@ -1286,7 +1286,7 @@ void main() {
       expect(out, contains('WEEK 1  [16 games]'));
     });
 
-    test('T-SCH3: every input game (teams + day + hour) appears in output', () {
+    /*test('T-SCH3: every input game (teams + day + hour) appears in output', () {
       SchedulerHelper.showDateTime = true;
       addTearDown(() => SchedulerHelper.showDateTime = false);
 
@@ -1329,12 +1329,13 @@ void main() {
       SchedulerHelper.showAllPlayoffGames = true;
       addTearDown(() => SchedulerHelper.showAllPlayoffGames = false);
       expect(tool.GetSchedule(), contains('--- PLAYOFFS ---'));
-    });
+    });*/
   });
 
   // ---------------------------------------------------------------------------
   // T-SCH-PO – Playoff schedule display with real playoff data
   // ---------------------------------------------------------------------------
+  /*
   group('T-SCH-PO – Playoff schedule display', () {
     // poW1: Wild Card games scheduled; weeks 19–22 are unresolved.
     // poW4: Through Pro Bowl; week 22 (Super Bowl) has 0 games.
@@ -1373,7 +1374,7 @@ void main() {
       expect(tool.GetSchedule(), contains('WEEK 22'));
     });
   });
-
+*/
   // ---------------------------------------------------------------------------
   // T-APF – ApplyFormula / GetPlayersByFormula correctness
   // ---------------------------------------------------------------------------
@@ -1552,6 +1553,79 @@ void main() {
       final after = int.parse(fresh.GetPlayerField(firstQB, 'Strength'));
       expect(after, equals((before * 0.50).toInt()));
     });
+
+    // T-APF-19: FormulaMode.Percent multiplies each player's attribute by the given
+    // percentage 
+    test('T-APF-19: FormulaMode.Percent scales attribute by percentage', () {
+      final fresh = GamesaveTool();
+      fresh.LoadSaveFile(testFile('Week_6_2024.zip'));
+      final qbs = fresh.GetPlayersByFormula('true', ['QB']);
+      final firstQB = qbs.first;
+      final before = int.parse(fresh.GetPlayerField(firstQB, 'Strength'));
+      InputParser parser = InputParser(fresh);
+      parser.ProcessLine("ApplyFormula('Strength > 5','Strength',50, [QB], Percent)");
+      final after = int.parse(fresh.GetPlayerField(firstQB, 'Strength'));
+      expect(after, equals((before * 0.50).toInt()));
+    });
+
+    // T-APF-20: FormulaMode.Percent multiplies each player's attribute by the given
+    // percentage 
+    test('T-APF-20: FormulaMode.Percent scales speed attribute by percentage', () {
+      final fresh = GamesaveTool();
+      fresh.LoadSaveFile(testFile('Week_6_2024.zip'));
+      final cbs = fresh.GetPlayersByFormula('Speed > 5', ['CB']);
+      final firstCB = cbs.first;
+      final before = int.parse(fresh.GetPlayerField(firstCB, 'Speed'));
+      fresh.ApplyFormula('Speed > 5', 'Speed', '50', ['CB'], FormulaMode.Percent, true);
+      final after = int.parse(fresh.GetPlayerField(firstCB, 'Speed'));
+      expect(after, equals((before * 0.50).toInt()));
+    });
+
+    // T-APF-21: FormulaMode.Percent multiplies each player's attribute by the given
+    // percentage 
+    test('T-APF-21: FormulaMode.Percent scales speed attribute by percentage', () {
+      final fresh = GamesaveTool();
+      fresh.LoadSaveFile(testFile('Week_6_2024.zip'));
+      final cbs = fresh.GetPlayersByFormula('Speed > 5', ['CB']);
+      final firstCB = cbs.first;
+      final before = int.parse(fresh.GetPlayerField(firstCB, 'Speed'));
+      InputParser parser = InputParser(fresh);
+      parser.ProcessLine("ApplyFormula('Speed > 20','Speed',50, [CB], Percent)");
+      //fresh.ApplyFormula('Speed > 5', 'Speed', '50', ['CB'], FormulaMode.Percent, true);
+      final after = int.parse(fresh.GetPlayerField(firstCB, 'Speed'));
+      expect(after, equals((before * 0.50).toInt()));
+    });
+
+
+    // T-APF-22: FormulaMode Increment adds each player's attribute by the given
+    // amount
+    test('T-APF-22: FormulaMode Increment Adds to the player value', () {
+      final fresh = GamesaveTool();
+      fresh.LoadSaveFile(testFile('Week_6_2024.zip'));
+      final cbs = fresh.GetPlayersByFormula('Speed > 5', ['CB']);
+      final firstCB = cbs.first;
+      final before = int.parse(fresh.GetPlayerField(firstCB, 'Speed'));
+      InputParser parser = InputParser(fresh);
+      parser.ProcessLine("ApplyFormula('Speed > 20','Speed',1, [CB], Increment)");
+      final after = int.parse(fresh.GetPlayerField(firstCB, 'Speed'));
+      expect(after, equals((before + 1 ).toInt()));
+    });
+   
+    // T-APF-23: FormulaMode Increment adds each player's attribute by the given
+    // amount
+    test('T-APF-23: FormulaMode Increment Adds to the player value', () {
+      final fresh = GamesaveTool();
+      fresh.LoadSaveFile(testFile('Week_6_2024.zip'));
+      final cbs = fresh.GetPlayersByFormula('Speed > 5', ['CB']);
+      final firstCB = cbs.first;
+      final before = int.parse(fresh.GetPlayerField(firstCB, 'Speed'));
+      InputParser parser = InputParser(fresh);
+      parser.ProcessLine("ApplyFormula('Speed > 20','Speed',-1, [CB], Increment)");
+      final after = int.parse(fresh.GetPlayerField(firstCB, 'Speed'));
+      expect(after, equals((before - 1 ).toInt()));
+    });
+   
+
   });
 }
 

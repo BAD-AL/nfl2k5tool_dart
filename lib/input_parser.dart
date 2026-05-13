@@ -245,9 +245,9 @@ class InputParser {
       String val = args[2].trim().replaceAll(RegExp(r"[' ]"), '');
       List<String> positions = _GetFormulaPositions(line);
 
-      if (line.toLowerCase().contains('add'))
+      if (line.toLowerCase().contains('percent'))
         fm = FormulaMode.Percent;
-      else if (line.toLowerCase().contains('increment'))
+      else if (line.toLowerCase().contains('increment') || line.toLowerCase().contains('add') )
         fm = FormulaMode.Add;
 
       String? results = Tool.ApplyFormula(formula, attr, val, positions, fm, true);

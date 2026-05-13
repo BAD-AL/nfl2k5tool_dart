@@ -1341,18 +1341,18 @@ class GamesaveTool {
     return helper.GetSchedule();
   }
 
-  /// Sets date and/or time for a specific franchise game.
-  /// [week] is 1-based (week 1 = first regular season week, week 18 = Wild Card).
-  /// [gameOfWeek] is 1-based.
-  void SetGameDateTime(int week, int gameOfWeek,
-      {int? month, int? day, int? hour, int? minute}) {
-    SchedulerHelper helper = SchedulerHelper(this);
-    helper.FranchiseScheduleMode = true;
-    helper.mYear = Year > 2000 ? Year - 2000 : 4;
-    // Convert from 1-based to 0-based.
-    helper.SetGameDateTime(week - 1, gameOfWeek - 1,
-        month: month, day: day, hour: hour, minute: minute);
-  }
+  ///// Sets date and/or time for a specific franchise game.
+  ///// [week] is 1-based (week 1 = first regular season week, week 18 = Wild Card).
+  ///// [gameOfWeek] is 1-based.
+  //void SetGameDateTime(int week, int gameOfWeek,
+  //    {int? month, int? day, int? hour, int? minute}) {
+  //  SchedulerHelper helper = SchedulerHelper(this);
+  //  helper.FranchiseScheduleMode = true;
+  //  helper.mYear = Year > 2000 ? Year - 2000 : 4;
+  //  // Convert from 1-based to 0-based.
+  //  helper.SetGameDateTime(week - 1, gameOfWeek - 1,
+  //      month: month, day: day, hour: hour, minute: minute);
+  //}
 
   void SetByte(int loc, int b) {
     GameSaveData![loc] = b;
@@ -1666,8 +1666,10 @@ class GamesaveTool {
     int v1, v2, v3;
     switch (attr) {
       case PlayerOffsets.PowerRunStyle:
-        PowerRunStyle style = PowerRunStyle.values.firstWhere((e) => e.name == stringVal);
-        SetByte(loc, style.value);
+        //PowerRunStyle style = PowerRunStyle.values.firstWhere((e) => e.name == stringVal);
+        //SetByte(loc, style.value);
+        final powerRunStyleNumeric = int.tryParse(stringVal);
+        SetByte(loc, powerRunStyleNumeric ?? PowerRunStyle.values.firstWhere((e) => e.name == stringVal).index);
         break;
       case PlayerOffsets.Face:
         final faceNumeric = int.tryParse(stringVal);

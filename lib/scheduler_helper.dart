@@ -13,7 +13,7 @@ import 'gamesave_tool.dart';
  * Weeks separated by 0x0007000000000000, which also signifies an empty game.
  * struct game { home_team, away_team, month, day_of_month, two_digit_year, hour_of_day, minute_of_hour, null_byte }
  *
- * Franchise file: Starts at 0x917EB, same format. Weeks 18–22 are playoffs (indices 17–21).
+ * Franchise file: Starts at 0x917EB, same format
  */
 
 /// Summary description for SchedulerHelper.
@@ -65,13 +65,6 @@ class SchedulerHelper {
 
   static bool AUTO_CORRECT_SCHEDULE = true;
 
-  /// When true, GetGame() appends day-of-week and time to each game string.
-  static bool showDateTime = false;
-
-  /// When true, GetSchedule() includes all playoff weeks regardless of whether
-  /// they have any games scheduled. Default (false) hides empty playoff weeks.
-  static bool showAllPlayoffGames = false;
-
   List<int>? mTeamGames;
 
   // for schedule files it's '2', for franchise files it's '0x917EB'.
@@ -79,29 +72,10 @@ class SchedulerHelper {
   static const int _mFranchiseFileWeekOneStartLoc = 0x917EB;
   static const int _mScheduleFileWeekOneStartLoc = 2;
 
-  // Playoff week indices (0-based): week 17 = Wild Card (displayed as WEEK 18), etc.
-  static const int kWildCardWeekIndex     = 17;
-  static const int kDivisionalWeekIndex   = 18;
-  static const int kChampionshipWeekIndex = 19;
-  static const int kProBowlWeekIndex      = 20;
-  static const int kSuperBowlWeekIndex    = 21;
-
   int mWeek = 0, mWeekGameCount = 0, mTotalGameCount = 0;
+  final RegExp mGameRegex = RegExp(r'([0-9a-z]+)\s+at\s+([0-9a-z]+)');
 
-  // Supports optional day-of-week token and time: "away at home [sun|mon|...|sat] [H:MM]"
-  final RegExp mGameRegex = RegExp(
-    r'([0-9a-z]+)\s+at\s+([0-9a-z]+)'
-    r'(?:\s+(sun|mon|tue|wed|thu|fri|sat))?'
-    r'(?:\s+(\d{1,2}):(\d{2}))?',
-  );
-
-  // mGamesPerWeek[i] = number of real game slots in week i (0-based).
-  // The franchise file always uses a fixed 136-byte stride per week (16 slots × 8 + separator × 8),
-  // regardless of how many real games are played that week.
-  final List<int> mGamesPerWeek = [
-    16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, // weeks 1–17
-    4, 4, 2, 1, 1, // Wild Card, Divisional, Championship, Pro Bowl, Super Bowl
-  ];
+  final List<int> mGamesPerWeek = [16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16];
 
   int get WeekOneStartLoc => mWeekOneStartLoc;
 
@@ -141,24 +115,7 @@ class SchedulerHelper {
     mWeekGameCount = 0;
     mTotalGameCount = 0;
 
-    final RegExp weekNumRegex = RegExp(r'week\s+(\d+)', caseSensitive: false);
-
-    // Determine what this schedule file contains.
-    bool hasRegularSeasonWeeks = lines.any((l) {
-      final wm = weekNumRegex.firstMatch(l.trim());
-      return wm != null && (int.tryParse(wm.group(1)!) ?? 0) <= 17;
-    });
-    bool hasPlayoffWeeks = lines.any((l) {
-      final wm = weekNumRegex.firstMatch(l.trim());
-      return wm != null && (int.tryParse(wm.group(1)!) ?? 0) >= 18;
-    });
-
-    // PatchSchedule resets regular season weeks from the embedded template.
-    // Skip it for playoff-only files so the existing season data is preserved.
-    if (hasRegularSeasonWeeks || !hasPlayoffWeeks) {
-      PatchSchedule();
-    }
-
+    PatchSchedule();
     // set up the year
     if (Tool.Year > 0) {
       String theYear = Tool.Year.toString();
@@ -168,10 +125,7 @@ class SchedulerHelper {
       }
     }
 
-    // Auto-correction re-layouts game lines and inserts WEEK markers — it must
-    // not run when the file contains playoff week markers (≥18) because it would
-    // scramble them into the regular-season layout.
-    if (AUTO_CORRECT_SCHEDULE && !hasPlayoffWeeks) {
+    if (AUTO_CORRECT_SCHEDULE) {
       ReLayoutScheduleWeeks(lines);
       lines = Ensure17Weeks(lines);
     }
@@ -181,28 +135,18 @@ class SchedulerHelper {
       if (line.startsWith('#') || line.length < 3) {
         // do nothing
       } else if (line.startsWith('week')) {
-        if (mWeek >= mGamesPerWeek.length) {
-          StaticUtils.AddError('Error! Week ${mWeek + 1} exceeds the maximum of ${mGamesPerWeek.length} weeks.');
+        if (mWeek > 17) {
+          StaticUtils.AddError('Error! You can have only 17 weeks in a season.');
           break;
         }
-        // Parse the week number so we can jump directly to it (e.g., "WEEK 18"
-        // in a playoff-only file should land on Wild Card, not week 1).
-        final wm = weekNumRegex.firstMatch(line);
-        int targetWeekIndex = wm != null ? (int.parse(wm.group(1)!) - 1) : -1;
-        // Close the currently open week.
         CloseWeek();
-        // If the file skips ahead (e.g., starts at WEEK 18), jump there directly.
-        // PatchSchedule has already initialized any skipped weeks.
-        if (targetWeekIndex > mWeek) {
-          mWeek = targetWeekIndex;
-        }
       } else {
         ScheduleGameFromLine(line);
       }
     }
-    CloseWeek(); // close the last week
+    CloseWeek(); // close week 17
 
-    if (hasRegularSeasonWeeks && mWeek < 17) {
+    if (mWeek < 17) {
       StaticUtils.AddError(
           "Warning! You didn't schedule all 17 weeks. The schedule could be messed up.");
     }
@@ -218,16 +162,11 @@ class SchedulerHelper {
 
   void CloseWeek() {
     if (mWeek > -1) {
-      int maxSlots = (mWeek < mGamesPerWeek.length) ? mGamesPerWeek[mWeek] : 16;
-      if (maxSlots == 16) {
-        // Regular season: fill remaining slots with null/bye marker.
-        int i = mWeekGameCount;
-        while (i < 16) {
-          ScheduleGameByIndex(0xff, 0xff, mWeek, i);
-          i++;
-        }
+      int i = mWeekGameCount;
+      while (i < 16) {
+        ScheduleGameByIndex(0xff, 0xff, mWeek, i);
+        i++;
       }
-      // Playoff weeks: unused slots are already zeros in the file; leave them.
     }
     mWeek++;
     mTotalGameCount += mWeekGameCount;
@@ -235,8 +174,6 @@ class SchedulerHelper {
   }
 
   /// Attempts to schedule a game from a line string.
-  /// Supports extended format: `away at home [dow] [H:MM]`
-  /// where dow is one of: sun mon tue wed thu fri sat
   bool ScheduleGameFromLine(String line) {
     bool ret = false;
     RegExpMatch? m = mGameRegex.firstMatch(line);
@@ -244,31 +181,11 @@ class SchedulerHelper {
     if (m != null) {
       String awayTeam = m.group(1)!;
       String homeTeam = m.group(2)!;
-      String? dowToken  = m.group(3);
-      String? hourStr   = m.group(4);
-      String? minuteStr = m.group(5);
-      int? targetWeekday = dowToken != null ? _dowTokenToWeekday(dowToken) : null;
-      int? hour   = hourStr   != null ? int.tryParse(hourStr)   : null;
-      int? minute = minuteStr != null ? int.tryParse(minuteStr) : null;
-
-      int maxGames = (mWeek >= 0 && mWeek < mGamesPerWeek.length) ? mGamesPerWeek[mWeek] : 16;
-      bool isTbd = awayTeam == 'tbd' && homeTeam == 'tbd';
-
-      if (mWeekGameCount >= maxGames) {
+      if (mWeekGameCount > 16) {
         StaticUtils.AddError(
-            'Error! Week ${mWeek + 1}: Too many games (max $maxGames).');
+            'Error! Week ${mWeek + 1}: You can have no more than 16 games in a week.');
         ret = false;
-      } else if (isTbd) {
-        // "tbd at tbd": keep existing team bytes, only update date/time.
-        if (targetWeekday != null || hour != null) {
-          _applyGameTimeOverrides(mWeek, mWeekGameCount, targetWeekday, hour, minute);
-        }
-        mWeekGameCount++;
-        ret = true;
       } else if (ScheduleGame(awayTeam, homeTeam, mWeek, mWeekGameCount)) {
-        if (targetWeekday != null || hour != null) {
-          _applyGameTimeOverrides(mWeek, mWeekGameCount, targetWeekday, hour, minute);
-        }
         mWeekGameCount++;
         ret = true;
       }
@@ -304,7 +221,7 @@ class SchedulerHelper {
     }
     if (GameLocation(week, gameOfWeek) < 0) {
       StaticUtils.AddError(
-          'Game $gameOfWeek for week $week is not valid. Valid games for week $week are 0-15.');
+          'Game $gameOfWeek for week $week is not valid. Valid games for week $week are 0-16.');
       return false;
     }
 
@@ -321,10 +238,7 @@ class SchedulerHelper {
       if (awayTeamIndex != 0xff && homeTeamIndex != 0xff) {
         Tool.SetByte(location + Game.HomeTeam.value, homeTeamIndex);
         Tool.SetByte(location + Game.AwayTeam.value, awayTeamIndex);
-        // Playoff games keep year=0x00; do not overwrite.
-        if (week < kWildCardWeekIndex) {
-          Tool.SetByte(location + Game.YearTwoDigit.value, mYear);
-        }
+        Tool.SetByte(location + Game.YearTwoDigit.value, mYear);
 
         try {
           DateTime time = GetGameTime(week, gameOfWeek);
@@ -368,24 +282,7 @@ class SchedulerHelper {
     return time;
   }
 
-  /// Sets date and/or time fields for a specific game without touching other bytes.
-  /// [week] is 0-based (0=week 1, 17=Wild Card, 21=Super Bowl).
-  /// [gameOfWeek] is 0-based within the week. Pass null for any field to leave it unchanged.
-  void SetGameDateTime(int week, int gameOfWeek, {int? month, int? day, int? hour, int? minute}) {
-    int location = GameLocation(week, gameOfWeek);
-    if (location == -1) {
-      StaticUtils.AddError('Invalid week=$week gameOfWeek=$gameOfWeek');
-      return;
-    }
-    if (month  != null) Tool.SetByte(location + Game.Month.value,        month);
-    if (day    != null) Tool.SetByte(location + Game.Day.value,          day);
-    // Noon (12 PM) is encoded as 0 in the file; user input "12" maps to 0.
-    if (hour   != null) Tool.SetByte(location + Game.HourOfDay.value,    hour == 12 ? 0 : hour);
-    if (minute != null) Tool.SetByte(location + Game.MinuteOfHour.value, minute);
-  }
-
   /// Returns a string like "49ers at giants" for a valid week/game combo.
-  /// When [showDateTime] is true, appends "  dow H:MM" (e.g. "  sun 4:15").
   String? GetGame(int week, int gameOfWeek) {
     int location = GameLocation(week, gameOfWeek);
     if (location == -1) return null;
@@ -399,38 +296,13 @@ class SchedulerHelper {
     int homeIndex = data[location];
     String ret = '';
 
-    if (awayIndex >= 0x20) {
-      // Both home and away use out-of-range placeholder indices (e.g. Super Bowl uses
-      // 0x20/0x21 permanently; other playoff rounds use 0x00 = 49ers as TBD placeholder).
-      // Nothing to display until the engine fills in real teams.
-      return ret;
-    }
-    // Note: index 0x00 = 49ers also serves as the "not yet scheduled" TBD placeholder for
-    // playoff rounds that haven't resolved yet. "49ers at 49ers" in playoff output means
-    // both slots are 0x00 — not actually the 49ers.
-    ret = '${GetTeamFromIndex(awayIndex)} at ${GetTeamFromIndex(homeIndex)}';
-
-    if (showDateTime) {
-      try {
-        int month   = data[location + Game.Month.value];
-        int day     = data[location + Game.Day.value];
-        int yearB   = data[location + Game.YearTwoDigit.value];
-        // Playoff games store year=0x00; use mYear for day-of-week calculation.
-        int year    = yearB == 0 ? (2000 + mYear) : (2000 + yearB);
-        int hour    = data[location + Game.HourOfDay.value];
-        int minute  = data[location + Game.MinuteOfHour.value];
-        DateTime dt = DateTime(year, month, day);
-        String dow  = _weekdayToToken(dt.weekday);
-        String hr   = hour == 0 ? '12' : '$hour';
-        ret += '  $dow $hr:${minute.toString().padLeft(2, '0')}';
-      } catch (_) {
-        // ignore invalid date bytes
-      }
+    if (awayIndex < 0x20) {
+      ret = '${GetTeamFromIndex(awayIndex)} at ${GetTeamFromIndex(homeIndex)}';
     }
     return ret;
   }
 
-  /// Returns a week from the season. [week] is 0-based (0 = week 1).
+  /// Returns a week from the season. [week] is 0-16 (0 = week 1).
   String? GetWeek(int week) {
     if (week < 0 || week > mGamesPerWeek.length - 1) return null;
     StringBuffer sb = StringBuffer();
@@ -452,40 +324,21 @@ class SchedulerHelper {
   String GetSchedule() {
     StringBuffer sb = StringBuffer();
     sb.write('YEAR=${Tool.Year}\n\n');
-    // Non-franchise files contain only 17 regular-season weeks.
-    int maxWeek = FranchiseScheduleMode ? mGamesPerWeek.length : kWildCardWeekIndex;
-    bool playoffHeaderWritten = false;
-    for (int week = 0; week < maxWeek; week++) {
-      bool isPlayoff = week >= kWildCardWeekIndex;
-      if (isPlayoff && !showAllPlayoffGames) {
-        bool hasGames = false;
-        for (int i = 0; i < mGamesPerWeek[week] && !hasGames; i++) {
-          String? game = GetGame(week, i);
-          if (game != null && game.isNotEmpty) hasGames = true;
-        }
-        if (!hasGames) continue;
-      }
-      if (isPlayoff && !playoffHeaderWritten) {
-        sb.write('--- PLAYOFFS ---\n\n');
-        playoffHeaderWritten = true;
-      }
+    for (int week = 0; week < mGamesPerWeek.length; week++)
       sb.write(GetWeek(week) ?? '');
-    }
     return sb.toString();
   }
 
-  /// Returns the file offset of the specified game record.
-  /// [week] is 0-based; [gameOfWeek] is 0-based within the week.
-  /// Returns -1 for out-of-range inputs.
   int GameLocation(int week, int gameOfWeek) {
-    if (week < 0 || week >= mGamesPerWeek.length ||
-        gameOfWeek < 0 || gameOfWeek >= mGamesPerWeek[week])
+    if (week < 0 || week > mGamesPerWeek.length - 1 ||
+        gameOfWeek > mGamesPerWeek[week] || gameOfWeek < 0)
       return -1;
 
-    // The franchise file always uses a 136-byte stride per week
-    // (16 game slots × 8 bytes + 1 separator slot × 8 bytes).
-    const int kWeekStride = 136;
-    return WeekOneStartLoc + week * kWeekStride + gameOfWeek * 8;
+    int offset = 0;
+    for (int i = 0; i < week; i++)
+      offset += (mGamesPerWeek[i] * 8) + 8;
+    offset += gameOfWeek * 8;
+    return WeekOneStartLoc + offset;
   }
 
   List<String> GetErrorMessages() {
@@ -550,53 +403,5 @@ class SchedulerHelper {
     if (index == 255) return 'null';
     if (index < 0 || index > mTeams.length - 1) return null;
     return mTeams[index];
-  }
-
-  // -- Day-of-week helpers --
-
-  /// Converts a three-letter DOW token to Dart's weekday (1=Mon … 7=Sun).
-  static int _dowTokenToWeekday(String token) {
-    const map = <String, int>{
-      'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6, 'sun': 7,
-    };
-    return map[token.toLowerCase()] ?? 1;
-  }
-
-  /// Converts a Dart weekday (1=Mon … 7=Sun) to a three-letter DOW token.
-  static String _weekdayToToken(int weekday) {
-    const tokens = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-    return tokens[(weekday - 1) % 7];
-  }
-
-  /// Adjusts the stored date/time for a just-scheduled game to match optional overrides.
-  void _applyGameTimeOverrides(
-      int week, int gameOfWeek, int? targetWeekday, int? hour, int? minute) {
-    int location = GameLocation(week, gameOfWeek);
-    if (location < 0) return;
-    Uint8List data = Tool.GameSaveData!;
-
-    if (targetWeekday != null) {
-      int month  = data[location + Game.Month.value];
-      int day    = data[location + Game.Day.value];
-      int yearB  = data[location + Game.YearTwoDigit.value];
-      int year   = yearB == 0 ? (2000 + mYear) : (2000 + yearB);
-      try {
-        DateTime current = DateTime(year, month, day);
-        // Shift ±3 days at most to reach the target weekday.
-        int delta = (targetWeekday - current.weekday) % 7;
-        if (delta > 3) delta -= 7;
-        // Use calendar arithmetic (year/month/day+delta) rather than
-        // Duration arithmetic to avoid DST: on fall-back days adding
-        // Duration(days:1) = 86400 s lands at 23:00 of the same calendar day.
-        DateTime target = DateTime(current.year, current.month, current.day + delta);
-        Tool.SetByte(location + Game.Month.value, target.month);
-        Tool.SetByte(location + Game.Day.value,   target.day);
-      } catch (_) {
-        // ignore invalid date
-      }
-    }
-    // Noon (12 PM) is encoded as 0 in the file; user input "12" maps to 0.
-    if (hour   != null) Tool.SetByte(location + Game.HourOfDay.value,    hour == 12 ? 0 : hour);
-    if (minute != null) Tool.SetByte(location + Game.MinuteOfHour.value, minute);
   }
 }
