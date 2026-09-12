@@ -34,6 +34,14 @@ class InputParser {
   /// true to use existing names; false to replace the names.
   bool UseExistingNames = false;
 
+  /// When set, FirstName/LastName writes are routed here instead of calling
+  /// Tool.SetPlayerFirstName/SetPlayerLastName directly — used by
+  /// PlayerNames' two-pass collect/commit flow (see player_names_apply.dart)
+  /// so player-name-pool decisions can be made before any bytes are written.
+  /// Null (the default) preserves today's behavior for every existing
+  /// caller.
+  void Function(int player, bool isLastName, String text)? NameSetter;
+
   GamesaveTool Tool;
 
   InputParser(this.Tool);
@@ -551,13 +559,19 @@ class InputParser {
           attr = Tool.Order![i];
           attribute = attributes[i];
           if (attr == -1) {
-            if (!Tool.SetPlayerFirstName(player, attribute, useExistingName))
+            if (NameSetter != null) {
+              NameSetter!(player, false, attribute);
+            } else if (!Tool.SetPlayerFirstName(player, attribute, useExistingName)) {
               StaticUtils.AddError(
                   "Error setting FirstName >$attribute< for '$line' Can only use existing names for college players.");
+            }
           } else if (attr == -2) {
-            if (!Tool.SetPlayerLastName(player, attribute, useExistingName))
+            if (NameSetter != null) {
+              NameSetter!(player, true, attribute);
+            } else if (!Tool.SetPlayerLastName(player, attribute, useExistingName)) {
               StaticUtils.AddError(
                   "Error setting LastName >$attribute< for '$line' Can only use existing names for college players.");
+            }
           } else if (attribute == '?' || attribute == '_') {
             // do nothing
           } else if (attr >= AppearanceAttributes.College.value) {

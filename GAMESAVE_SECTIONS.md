@@ -30,7 +30,8 @@ The first 4 bytes of the file identify the save type.
 | String table | `0x75960` | `0x88D8F` | `0x75C40` | `0x8906F` | 78,896 bytes — subdivided into S1a / S2 / S3a / S3b (see String Table section) |
 | Unknown / padding | `0x88D90` | `0x8B7CF` | `0x8906F` | `0x8BAB0` | ~10,816 bytes — contents not yet fully mapped |
 | College player names | `0x8B7D0` | `0x8F00F` | `0x8BAB0` | `0x8F2EF` | Read-only UTF-16LE college player name strings; referenced by player records via signed relative pointers |
-| Franchise schedule year | — | — | `0x917EF` | `0x917EF` | 1 byte — current year offset from 2000 |
+| Franchise schedule year | — | — | `0x917EF` | `0x917EF` | 1 byte — current year offset from 2000 (also bytes[4] of the first game record) |
+| Franchise live schedule | — | — | `0x917EB` | ~`0x09239A` | 22 weeks × 136 bytes — regular season (wks 1–17) + playoffs (wks 18–22). Same 8-byte game record format as `.nfl2k5` files: `[home, away, month, day, year, hour, min, played_flag]`. Wild Card at `0x0920F3`, Divisional at `0x09217B`, Championship at `0x092203`, Pro Bowl at `0x09228B`, Super Bowl at `0x092313`. See `analysis/playoffs/playoff_schedule_findings.md`. |
 
 ¹ `mPlayerStart` defaults to `0xAFA8` for the base roster. Community-edited rosters (e.g. Flying Finn) may use `0xAFF0`.
 
