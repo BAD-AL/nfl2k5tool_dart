@@ -16,7 +16,9 @@ import 'gamesave_tool.dart';
 /// Mirrors GamesaveTool._cPlayerDataLength, which is file-private there.
 const int _kPlayerDataLength = 0x54;
 
-/// One player's first- or last-name slot.
+/// One player's first- or last-name slot. Only ever constructed for Team +
+/// FreeAgent players — draft-class players are entirely outside PlayerNames'
+/// domain (see PlayerNames._load).
 class NameRef {
   final int playerIndex;
   final bool isLastName;
@@ -25,7 +27,6 @@ class NameRef {
   /// Position within GetPlayerIndexesForTeam('FreeAgents'); null if not a
   /// free agent. Lower = listed earlier = higher priority (protected later).
   final int? freeAgentListOrder;
-  final bool isDraftClass;
 
   String text;
 
@@ -44,7 +45,6 @@ class NameRef {
     required this.text,
     required this.isFreeAgent,
     required this.freeAgentListOrder,
-    required this.isDraftClass,
   });
 }
 
@@ -169,6 +169,24 @@ class PlayerNames {
     return names;
   }
 
+  /// Team + FreeAgent players — the exclusive upper bound of PlayerNames'
+  /// *editable* domain. Draft-class players (this index and above) are
+  /// never edited through PlayerNames: edits to them are handled by the
+  /// caller via the original SetPlayerFirstName/LastName(..., useExistingName)
+  /// path — see player_names_apply.dart.
+  ///
+  /// In a Franchise save, every draft-class name pointer resolves outside
+  /// S3b entirely (verified against real files — they point into the
+  /// separate, pre-existing, read-only college-name section), so in that
+  /// file type this is also where *modeling* stops. But in a Roster save,
+  /// this same index range holds a handful of fixed, permanent entries (e.g.
+  /// broadcast-booth names) whose pointers resolve *inside* S3b — that's
+  /// real data physically living in the pool this class repacks. [_load]'s
+  /// second pass finds and models those specific entries (read-only —
+  /// never a dedup/truncation candidate, never edited) purely so [commit]'s
+  /// repack preserves rather than silently zeroes them.
+  static int get _modeledPlayerCount => GamesaveTool.FirstDraftClassPlayer;
+
   void _load() {
     final faIndexes = tool.GetPlayerIndexesForTeam('FreeAgents');
     final faOrder = <int, int>{};
@@ -177,9 +195,8 @@ class PlayerNames {
     }
 
     int computedS3bStart = tool.mModifiableNameSectionEnd;
-    for (int p = 0; p <= tool.mMaxPlayers; p++) {
+    for (int p = 0; p < _modeledPlayerCount; p++) {
       final isFA = faOrder.containsKey(p);
-      final isDraft = p >= GamesaveTool.FirstDraftClassPlayer;
 
       _firstNames.add(NameRef(
         playerIndex: p,
@@ -187,7 +204,6 @@ class PlayerNames {
         text: tool.GetPlayerFirstName(p),
         isFreeAgent: isFA,
         freeAgentListOrder: faOrder[p],
-        isDraftClass: isDraft,
       ));
       _lastNames.add(NameRef(
         playerIndex: p,
@@ -195,7 +211,6 @@ class PlayerNames {
         text: tool.GetPlayerLastName(p),
         isFreeAgent: isFA,
         freeAgentListOrder: faOrder[p],
-        isDraftClass: isDraft,
       ));
 
       for (final off in const [0, 4]) {
@@ -209,9 +224,44 @@ class PlayerNames {
       }
     }
     s3bStart = computedS3bStart;
+
+    // Draft-class-range entries that actually live inside S3b (see the doc
+    // comment on _modeledPlayerCount) — model them read-only so commit()'s
+    // repack preserves them (retargeting their pointer to wherever they land)
+    // instead of leaving an unmanaged, un-retargeted pointer whose fixed
+    // relative offset can coincidentally alias newly-written content once
+    // the pool is repacked. This must include empty-text entries too — an
+    // empty one left un-retargeted is exactly what silently aliased a real
+    // repacked string once the pool moved (confirmed reproducible against
+    // the Roster fixture, not just theoretical): its old destination address
+    // was empty at load time, but after repacking, something else legitimate
+    // ended up written at that same address, making the untouched pointer
+    // appear to newly "share" it with whatever field owns that string.
+    for (int p = _modeledPlayerCount; p <= tool.mMaxPlayers; p++) {
+      for (final off in const [0, 4]) {
+        final ptrLoc = p * _kPlayerDataLength + tool.FirstPlayerFnamePointerLoc + off;
+        final dest = tool.GetPointerDestination(ptrLoc);
+        if (dest < s3bStart || dest >= tool.mModifiableNameSectionEnd) continue;
+        final isLast = off == 4;
+        final text = isLast ? tool.GetPlayerLastName(p) : tool.GetPlayerFirstName(p);
+        (isLast ? _lastNames : _firstNames).add(NameRef(
+          playerIndex: p,
+          isLastName: isLast,
+          text: text,
+          isFreeAgent: false,
+          freeAgentListOrder: null,
+        ));
+      }
+    }
   }
 
+  /// Only ever call this for Team/FreeAgent players (player < FirstDraftClassPlayer).
+  /// Draft-class edits must go through the original SetPlayerFirstName/
+  /// LastName(..., useExistingName) path instead — see player_names_apply.dart.
   void overlayEdit(int player, bool isLastName, String text) {
+    assert(player < _modeledPlayerCount,
+        'overlayEdit called for a draft-class player ($player) — draft-class '
+        'edits must bypass PlayerNames entirely, see player_names_apply.dart');
     (isLastName ? _lastNames : _firstNames)[player].text = text;
   }
 
@@ -246,7 +296,6 @@ class PlayerNames {
 
   /// Lower = higher priority = more protected = preferred dedup owner.
   int _ownerPriorityScore(NameRef r) {
-    if (r.isDraftClass) return 2000000 + (r.freeAgentListOrder ?? 0);
     if (r.isFreeAgent) return 1000000 + (r.freeAgentListOrder ?? 0);
     return 0;
   }
@@ -312,9 +361,8 @@ class PlayerNames {
   /// longest name first (fewest players touched), tie-broken by
   /// last-listed-free-agent-first. [targetBytes] behaves as in [planDedup].
   TruncationPlan planTruncation({int? targetBytes}) {
-    final candidates = _firstNames
-        .where((r) => r.isFreeAgent && !r.isDraftClass && r.text.length > 4)
-        .toList();
+    final candidates =
+        _firstNames.where((r) => r.isFreeAgent && r.text.length > 4).toList();
     candidates.sort((a, b) {
       final lenCompare = b.text.length.compareTo(a.text.length);
       if (lenCompare != 0) return lenCompare;
@@ -386,13 +434,26 @@ class PlayerNames {
     }
 
     // Safety check: refuse if a pointer this class doesn't manage (coach
-    // strings, college-institution names) currently resolves inside the
-    // pool we're about to overwrite. Repacking would silently destroy that
-    // data rather than just leave a stale pointer — coach strings live in
-    // S2 (always before S3b) so this should never fire for them in
-    // practice, but college-institution names are confirmed (via
-    // GamesaveTool's own _adjustCollegeEntryPointers bug-fix history) to
-    // sometimes land inside this range in real files.
+    // strings, college-institution names) currently resolves inside the pool
+    // we're about to overwrite. Repacking would silently destroy that data
+    // rather than just leave a stale pointer — coach strings live in S2
+    // (always before S3b) so this should never fire for them in practice,
+    // but college-institution names are confirmed (via GamesaveTool's own
+    // _adjustCollegeEntryPointers bug-fix history) to sometimes land inside
+    // this range in real files.
+    //
+    // Draft-class-range player pointers don't need an equivalent live
+    // re-check here: any of them that already resolved into S3b *before*
+    // this operation began was already found and modeled read-only by
+    // _load()'s system-resident pass (so it gets safely repacked, not
+    // refused), and any that a caller's edit newly points into S3b during
+    // pass 1 (a draft-class row reusing an S3b string via useExistingName)
+    // is correctly re-resolved by pass 2 after this repack, once the commit
+    // that pass 2 depends on is allowed to succeed — see
+    // player_names_apply.dart's two-pass design. A live re-read here would
+    // wrongly refuse exactly that legitimate case, since it can't tell "was
+    // already stale before we started" apart from "pass 1 just pointed it
+    // here as part of this same, self-correcting edit".
     final overlaps = <String>[];
     for (int team = 0; team < 32; team++) {
       final coachRecBase = tool.GetPointerDestination(tool.GetCoachPointer(team));

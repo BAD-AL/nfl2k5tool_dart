@@ -66,11 +66,20 @@ void main() {
     test('franchise baseline requiredBytes/requiredBytesAfterDedup (regression guard)', () {
       final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
       final names = PlayerNames.fromTool(tool);
-      // Franchise carries a much larger draft class (380 vs 6 slots), so the
-      // naive (no-sharing) total already exceeds budget in the stock file —
-      // this is expected and is exactly the scenario this feature exists for.
-      expect(names.requiredBytes, equals(63032));
-      expect(names.requiredBytesAfterDedup, equals(32516));
+      // PlayerNames' *editable* domain is Team + FreeAgent players only —
+      // draft class (up to 380 players in franchise) is never edited through
+      // it. In this file, every draft-class name pointer also resolves
+      // outside S3b entirely (into the separate, read-only college-name
+      // section), except for a single always-empty, structurally-unused
+      // slot one past the real player count — _load()'s system-resident
+      // pass models that one read-only (4 bytes: two empty strings) purely
+      // so commit()'s repack can't orphan its pointer, but it never holds
+      // real content. A completely untouched stock file must therefore
+      // already fit with zero reduction — this is the exact regression this
+      // guard exists to catch (see T-PN-14 for the full pipeline version).
+      expect(names.requiredBytes, equals(52614));
+      expect(names.requiredBytes, lessThan(PlayerNames.budget));
+      expect(names.requiredBytesAfterDedup, equals(29350));
       expect(names.requiredBytesAfterDedup, lessThan(names.requiredBytes),
           reason: 'Dedup ceiling must always be <= the naive total');
     });
@@ -80,6 +89,22 @@ void main() {
       final names = PlayerNames.fromTool(tool);
       expect(names.requiredBytes, equals(52788));
       expect(names.requiredBytes, lessThan(PlayerNames.budget));
+    });
+
+    test('roster carries extra system-resident bytes franchise does not', () {
+      // Unlike Franchise, where the draft-class index range resolves
+      // outside S3b (into the college-name section) with one harmless empty
+      // exception (see the test above), Roster's equivalent range holds a
+      // handful of fixed, permanent entries (e.g. broadcast-booth names)
+      // whose pointers resolve *inside* S3b for this save type — real
+      // content _load()'s system-resident pass must model read-only so
+      // commit()'s repack preserves rather than destroys it. That makes the
+      // two save types' baselines genuinely different, not bugs to reconcile.
+      final franchiseNames =
+          PlayerNames.fromTool(GamesaveTool()..LoadSaveFile(testFile(_franchise)));
+      final rosterNames =
+          PlayerNames.fromTool(GamesaveTool()..LoadSaveFile(testFile(_roster)));
+      expect(rosterNames.requiredBytes - franchiseNames.requiredBytes, equals(174));
     });
   });
 
@@ -112,7 +137,7 @@ void main() {
     test('known duplicate groups produce expected best-case savings', () {
       final plan = names.planDedup();
       expect(plan.groups, isNotEmpty);
-      expect(plan.totalSavings, equals(30516));
+      expect(plan.totalSavings, equals(23264));
       final williams = plan.groups.firstWhere((g) => g.text == 'Williams' && g.isLastName);
       expect(williams.savingsBytes, equals(648));
       expect(williams.redirected.length, equals(36));
@@ -122,11 +147,11 @@ void main() {
       final plan = names.planDedup();
       for (final g in plan.groups) {
         for (final r in g.redirected) {
-          // Never redirect to a free agent or draft-class canonical when a
-          // protected (active roster) member exists in the same group.
-          if (!g.canonical.isFreeAgent && !g.canonical.isDraftClass) continue;
-          expect(r.isFreeAgent || r.isDraftClass, isTrue,
-              reason: 'If canonical is FA/draft-class, no protected member can exist in the group');
+          // Never redirect to a free-agent canonical when a protected
+          // (active roster) member exists in the same group.
+          if (!g.canonical.isFreeAgent) continue;
+          expect(r.isFreeAgent, isTrue,
+              reason: 'If canonical is a free agent, no protected member can exist in the group');
         }
       }
     });
@@ -165,7 +190,7 @@ void main() {
       final result = names.commit();
 
       expect(result.success, isTrue);
-      expect(result.bytesUsed, equals(32516));
+      expect(result.bytesUsed, equals(29350));
       expect(result.bytesUsed, lessThan(PlayerNames.budget));
 
       // Spot-check a known duplicate group (see T-PN-3).
@@ -208,11 +233,13 @@ void main() {
     });
 
     test('only free agents (never draft class or active roster) are candidates', () {
+      // Draft-class players aren't modeled by PlayerNames at all (see
+      // PlayerNames._load), so this is really just checking free-agent-only.
       final plan = names.planTruncation();
       expect(plan.entries, isNotEmpty);
       for (final e in plan.entries) {
         expect(e.ref.isFreeAgent, isTrue);
-        expect(e.ref.isDraftClass, isFalse);
+        expect(e.ref.playerIndex, lessThan(GamesaveTool.FirstDraftClassPlayer));
       }
     });
 
@@ -323,7 +350,7 @@ void main() {
       final snapshot = Uint8List.fromList(tool.GameSaveData!);
       final names = PlayerNames.fromTool(tool);
 
-      for (int p = 0; p <= tool.mMaxPlayers; p++) {
+      for (int p = 0; p < GamesaveTool.FirstDraftClassPlayer; p++) {
         names.overlayEdit(p, false, '${'X' * 50}$p');
         names.overlayEdit(p, true, '${'Y' * 50}$p');
       }
@@ -409,13 +436,13 @@ void main() {
       final names = collectPlayerNamesFromText(tool, text);
       // Same real-world figure as the binary-only capacity test (T-PN-1) —
       // this text is a serialization of the same underlying save.
-      expect(names.requiredBytes, equals(63032));
+      expect(names.requiredBytes, equals(52614));
 
       names.applyDedup(names.planDedup());
       final result = commitPlayerNamesAndApplyRest(tool, text, names);
 
       expect(result.success, isTrue);
-      expect(result.bytesUsed, equals(32516));
+      expect(result.bytesUsed, equals(29350));
       expect(tool.GetPlayerFirstName(0), equals(origFirst0));
       expect(tool.GetPlayerLastName(0), equals(origLast0));
       expect(tool.checkNamePointers(), isTrue,
@@ -484,18 +511,18 @@ void main() {
 
       // Genuinely over budget with zero reduction — unlike our own exported
       // fixtures, this wasn't authored with any pointer-sharing baked in.
-      expect(names.requiredBytes, equals(65422));
+      expect(names.requiredBytes, equals(55004));
       expect(names.requiredBytes, greaterThan(PlayerNames.budget));
 
       final dedup = names.planDedup();
-      expect(dedup.totalSavings, equals(25862));
+      expect(dedup.totalSavings, equals(19094));
       names.applyDedup(dedup);
 
       StaticUtils.Errors.clear();
       final result = commitPlayerNamesAndApplyRest(tool, text, names);
 
       expect(result.success, isTrue);
-      expect(result.bytesUsed, equals(39560));
+      expect(result.bytesUsed, equals(35910));
       expect(result.bytesUsed, lessThan(PlayerNames.budget));
       expect(tool.checkNamePointers(), isTrue,
           reason: 'Dedup deliberately created shared pointers');
@@ -572,34 +599,196 @@ void main() {
       File(tmp).deleteSync();
     });
 
-    test('truncation alone is honestly insufficient for this file; fails safely', () {
+    test('truncation alone is sufficient for this file', () {
+      // Before the draft-class-exclusion fix, this file's deficit was 11,119
+      // bytes and truncation's 1,480-byte best case fell far short of it —
+      // this test used to prove the "insufficient, fails safely" path with
+      // real data. Excluding draft class (which never needed S3b space to
+      // begin with) shrinks the deficit to 701 bytes, which truncation alone
+      // now covers. That's not a weaker test — it's a direct, visible
+      // consequence of the fix, worth asserting explicitly so a future
+      // regression back to the old (wrong) numbers is caught here too. The
+      // "insufficient, fails safely" case is still fully covered by T-PN-9
+      // with deliberately-synthetic worst-case data.
       final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
       final text = File(testFile(_maddenConversion)).readAsStringSync();
-      final snapshot = Uint8List.fromList(tool.GameSaveData!);
 
       StaticUtils.Errors.clear();
       final names = collectPlayerNamesFromText(tool, text);
       final deficit = names.requiredBytes - PlayerNames.budget;
-      expect(deficit, equals(11119));
+      expect(deficit, equals(701));
 
       final trunc = names.planTruncation();
-      // Only 187 free-agent first names even qualify (>4 chars); their
-      // combined best case falls far short of the real deficit here — this
-      // is not a synthetic worst case, it's what this actual file needs.
       expect(trunc.entries.length, equals(187));
       expect(trunc.totalSavings, equals(1480));
-      expect(trunc.totalSavings, lessThan(deficit),
-          reason: 'Ground truth: truncation alone cannot close this file\'s gap');
+      expect(trunc.totalSavings, greaterThanOrEqualTo(deficit),
+          reason: 'Truncation alone now closes this file\'s (corrected) gap');
       names.applyTruncation(trunc);
 
       StaticUtils.Errors.clear();
       final result = commitPlayerNamesAndApplyRest(tool, text, names);
 
-      expect(result.success, isFalse);
-      expect(result.warnings, isNotEmpty);
-      expect(_bytesEqual(tool.GameSaveData!, snapshot), isTrue,
-          reason: 'A failed commit must leave GameSaveData completely untouched, '
-              'even when the shortfall came from real data rather than a synthetic case');
+      expect(result.success, isTrue);
+      expect(result.bytesUsed, lessThanOrEqualTo(PlayerNames.budget));
+    });
+  });
+
+  // T-PN-14 — The headline regression guard: a genuine no-op export of the
+  // stock franchise file must never need a dialog. This is exactly the bug
+  // the user caught live (recording a demo GIF of "open the stock franchise
+  // file, make one simple edit, export" and getting an unexpected overflow
+  // dialog on a file that should just work) — draft-class players were being
+  // modeled and charged against the S3b budget even though none of their
+  // 762 name slots live in S3b at all (verified: every one of them resolves
+  // into the separate, read-only college-name section in the real file).
+  group('T-PN-14 Zero-edit franchise export stays silent', () {
+    test('stock franchise file, zero edits, zero reduction: succeeds with room to spare', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      final key = tool.GetKey(true, true);
+      final text = '$key\n${tool.GetLeaguePlayers(true, true, false)}';
+
+      final origFirst0 = tool.GetPlayerFirstName(0);
+      final origLast0 = tool.GetPlayerLastName(0);
+
+      final names = collectPlayerNamesFromText(tool, text);
+      expect(names.requiredBytes, lessThanOrEqualTo(PlayerNames.budget),
+          reason: 'A genuine no-op export must never need a reduction dialog');
+
+      final result = commitPlayerNamesAndApplyRest(tool, text, names);
+      expect(result.success, isTrue);
+      expect(result.warnings, isEmpty);
+      expect(tool.GetPlayerFirstName(0), equals(origFirst0));
+      expect(tool.GetPlayerLastName(0), equals(origLast0));
+    });
+  });
+
+  // T-PN-15 — The literal scenario from the demo GIF that caught this bug:
+  // open the stock franchise file, make one simple edit, export.
+  group('T-PN-15 Simple default-franchise edit stays silent', () {
+    test('one first-name edit on the stock franchise file exports with no reduction needed', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      final key = tool.GetKey(true, true);
+      final origFirst = tool.GetPlayerFirstName(0);
+      final origLast = tool.GetPlayerLastName(0);
+      final text = '$key\n${tool.GetLeaguePlayers(true, true, false)}';
+      final edited = text.replaceFirst('$origFirst,$origLast', 'Marcus,$origLast');
+
+      final names = collectPlayerNamesFromText(tool, edited);
+      expect(names.requiredBytes, lessThanOrEqualTo(PlayerNames.budget),
+          reason: 'One simple name edit on the stock file must not trigger overflow');
+
+      final result = commitPlayerNamesAndApplyRest(tool, edited, names);
+      expect(result.success, isTrue);
+      expect(result.warnings, isEmpty);
+      expect(tool.GetPlayerFirstName(0), equals('Marcus'));
+      expect(tool.GetPlayerLastName(0), equals(origLast));
+    });
+  });
+
+  // T-PN-16 — Draft-class edits bypass PlayerNames entirely and go through
+  // the original SetPlayerFirstName/LastName(..., useExistingName) path.
+  group('T-PN-16 Draft-class edits are handled outside PlayerNames', () {
+    test('editing a draft-class name to reuse an existing string still applies correctly', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      final draftPlayer = GamesaveTool.FirstDraftClassPlayer;
+      final existingFirst = tool.GetPlayerFirstName(0);
+      final existingLast = tool.GetPlayerLastName(0);
+      final origDraftFirst = tool.GetPlayerFirstName(draftPlayer);
+      final origDraftLast = tool.GetPlayerLastName(draftPlayer);
+
+      final key = tool.GetKey(true, true);
+      final draftText = tool.GetDraftClass(true, true);
+      final text = '$key\n${tool.GetLeaguePlayers(true, true, false)}\n$draftText';
+      final edited = text.replaceFirst(
+          '$origDraftFirst,$origDraftLast', '$existingFirst,$existingLast');
+
+      final beforeBytes = PlayerNames.fromTool(tool).requiredBytes;
+      final names = collectPlayerNamesFromText(tool, edited);
+      expect(names.requiredBytes, equals(beforeBytes),
+          reason: 'Draft-class edits must never affect the S3b budget');
+
+      final result = commitPlayerNamesAndApplyRest(tool, edited, names);
+      expect(result.success, isTrue);
+      expect(tool.GetPlayerFirstName(draftPlayer), equals(existingFirst));
+      expect(tool.GetPlayerLastName(draftPlayer), equals(existingLast));
+    });
+  });
+
+  // T-PN-17 — System-resident draft-class-range entries (data physically
+  // inside S3b despite being outside PlayerNames' editable domain) must
+  // survive a repack unchanged, in both directions this session found real
+  // bugs in: entries that were always there (Roster's fixed broadcast-booth
+  // names), and an entry that happens to already point into S3b before any
+  // edit (a rare but real pre-existing-save-state case).
+  group('T-PN-17 System-resident draft-class-range entries survive repack', () {
+    test('Roster broadcast-booth names round-trip through a non-dedup commit', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_roster));
+      final booth = <int, (String, String)>{};
+      for (int p = GamesaveTool.FirstDraftClassPlayer; p <= tool.mMaxPlayers; p++) {
+        booth[p] = (tool.GetPlayerFirstName(p), tool.GetPlayerLastName(p));
+      }
+      expect(booth.values.any((n) => n.$1.isNotEmpty || n.$2.isNotEmpty), isTrue,
+          reason: 'Sanity check that this fixture really has system-resident content to protect');
+
+      final names = PlayerNames.fromTool(tool);
+      final result = names.commit();
+      expect(result.success, isTrue);
+      expect(tool.checkNamePointers(), isFalse,
+          reason: 'A non-dedup commit must never leave two fields aliasing the same address — '
+              'this caught a real bug where an un-retargeted empty pointer coincidentally '
+              'resolved into newly-repacked content after the pool moved');
+
+      for (final entry in booth.entries) {
+        expect(tool.GetPlayerFirstName(entry.key), equals(entry.value.$1));
+        expect(tool.GetPlayerLastName(entry.key), equals(entry.value.$2));
+      }
+
+      final tmp = '${Directory.systemTemp.path}/nfl2k5_pn_t17.dat';
+      tool.SaveFile(tmp);
+      final reloaded = GamesaveTool()..LoadSaveFile(tmp);
+      for (final entry in booth.entries) {
+        expect(reloaded.GetPlayerFirstName(entry.key), equals(entry.value.$1));
+        expect(reloaded.GetPlayerLastName(entry.key), equals(entry.value.$2));
+      }
+      File(tmp).deleteSync();
+    });
+
+    test('a draft-class pointer that already resolves into S3b before any edit is preserved, '
+        'not corrupted, by an unrelated commit', () {
+      // Simulates a rare but real pre-existing save-state: some draft-class
+      // player's name pointer already resolves into S3b (e.g. a leftover
+      // from a prior useExistingName edit) *before* this session's edit ever
+      // starts, and this session's text never mentions that player at all.
+      // Before this fix, PlayerNames didn't model it, so commit()'s repack
+      // either corrupted it (read back as garbage) or, after an interim fix,
+      // refused to commit at all. Now it's modeled read-only and correctly
+      // preserved through the repack.
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      final draftPlayer = GamesaveTool.FirstDraftClassPlayer + 5;
+      const kPlayerDataLength = 0x54;
+      final p0First = tool.GetPlayerFirstName(0);
+      final p0PtrLoc = 0 * kPlayerDataLength + tool.FirstPlayerFnamePointerLoc;
+      final p0Dest = tool.GetPointerDestination(p0PtrLoc);
+      final draftPtrLoc = draftPlayer * kPlayerDataLength + tool.FirstPlayerFnamePointerLoc;
+      final value = p0Dest - draftPtrLoc + 1;
+      tool.SetByte(draftPtrLoc, value & 0xff);
+      tool.SetByte(draftPtrLoc + 1, (value >> 8) & 0xff);
+      tool.SetByte(draftPtrLoc + 2, (value >> 16) & 0xff);
+      tool.SetByte(draftPtrLoc + 3, (value >> 24) & 0xff);
+      expect(tool.GetPlayerFirstName(draftPlayer), equals(p0First),
+          reason: 'Sanity check that the manual poke really did alias player 0\'s first name');
+
+      final key = tool.GetKey(true, true);
+      final origP0Last = tool.GetPlayerLastName(0);
+      final text = '$key\n${tool.GetLeaguePlayers(true, true, false)}';
+      final edited = text.replaceFirst('$p0First,$origP0Last', 'Marcus,$origP0Last');
+
+      final names = collectPlayerNamesFromText(tool, edited);
+      final result = commitPlayerNamesAndApplyRest(tool, edited, names);
+
+      expect(result.success, isTrue);
+      expect(tool.GetPlayerFirstName(draftPlayer), equals(p0First),
+          reason: 'The pre-existing alias must survive an unrelated commit unchanged');
     });
   });
 }

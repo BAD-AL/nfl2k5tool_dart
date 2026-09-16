@@ -38,9 +38,13 @@ class InputParser {
   /// Tool.SetPlayerFirstName/SetPlayerLastName directly — used by
   /// PlayerNames' two-pass collect/commit flow (see player_names_apply.dart)
   /// so player-name-pool decisions can be made before any bytes are written.
-  /// Null (the default) preserves today's behavior for every existing
-  /// caller.
-  void Function(int player, bool isLastName, String text)? NameSetter;
+  /// The 4th parameter is the same useExistingName flag SetPlayerFirstName/
+  /// LastName would otherwise receive (forced true for draft-class rows by
+  /// InsertPlayer below) — callers that only handle Team/FreeAgent players
+  /// still need it to route draft-class rows through the original direct-
+  /// write path instead. Null (the default) preserves today's behavior for
+  /// every existing caller.
+  void Function(int player, bool isLastName, String text, bool useExistingName)? NameSetter;
 
   GamesaveTool Tool;
 
@@ -560,14 +564,14 @@ class InputParser {
           attribute = attributes[i];
           if (attr == -1) {
             if (NameSetter != null) {
-              NameSetter!(player, false, attribute);
+              NameSetter!(player, false, attribute, useExistingName);
             } else if (!Tool.SetPlayerFirstName(player, attribute, useExistingName)) {
               StaticUtils.AddError(
                   "Error setting FirstName >$attribute< for '$line' Can only use existing names for college players.");
             }
           } else if (attr == -2) {
             if (NameSetter != null) {
-              NameSetter!(player, true, attribute);
+              NameSetter!(player, true, attribute, useExistingName);
             } else if (!Tool.SetPlayerLastName(player, attribute, useExistingName)) {
               StaticUtils.AddError(
                   "Error setting LastName >$attribute< for '$line' Can only use existing names for college players.");

@@ -20,9 +20,34 @@ PlayerNames collectPlayerNamesFromText(GamesaveTool tool, String text) {
   final names = PlayerNames.fromTool(tool);
   names.preCollectSnapshot = Uint8List.fromList(tool.GameSaveData!);
   final parser = InputParser(tool)
-    ..NameSetter = (player, isLastName, value) => names.overlayEdit(player, isLastName, value);
+    ..NameSetter = (player, isLastName, value, useExistingName) {
+      if (player < GamesaveTool.FirstDraftClassPlayer) {
+        names.overlayEdit(player, isLastName, value);
+      } else {
+        _writeDraftClassName(tool, player, isLastName, value, useExistingName);
+      }
+    };
   parser.ProcessText(text);
   return names;
+}
+
+/// Draft-class rows are entirely outside PlayerNames' domain (see
+/// PlayerNames._load) — their names never live in S3b, so they're written
+/// directly via the same path InputParser used before this feature existed,
+/// preserving the useExistingName constraint InsertPlayer already enforces
+/// for them.
+void _writeDraftClassName(
+  GamesaveTool tool,
+  int player,
+  bool isLastName,
+  String value,
+  bool useExistingName,
+) {
+  if (isLastName) {
+    tool.SetPlayerLastName(player, value, useExistingName);
+  } else {
+    tool.SetPlayerFirstName(player, value, useExistingName);
+  }
 }
 
 /// Commits [names] (after the caller has applied whatever reduction plans it
@@ -43,7 +68,13 @@ CommitResult commitPlayerNamesAndApplyRest(GamesaveTool tool, String text, Playe
     }
     return result;
   }
-  final parser = InputParser(tool)..NameSetter = (player, isLastName, value) {};
+  final parser = InputParser(tool)
+    ..NameSetter = (player, isLastName, value, useExistingName) {
+      // Team/FreeAgent rows: already written by commit() above, no-op here.
+      if (player >= GamesaveTool.FirstDraftClassPlayer) {
+        _writeDraftClassName(tool, player, isLastName, value, useExistingName);
+      }
+    };
   parser.ProcessText(text);
   return result;
 }
