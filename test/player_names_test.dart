@@ -824,6 +824,53 @@ void main() {
               'S3b budget check.');
     });
 
+    test('a pure LookupAndVerify script (no Team= section) does not trigger the check', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      final pos = tool.GetPlayerPosition(0);
+      final origFirst = tool.GetPlayerFirstName(0);
+      final origLast = tool.GetPlayerLastName(0);
+      final origJersey = tool.GetPlayerField(0, 'JerseyNumber');
+      // Read-only: verifies player 0's current data matches, never writes
+      // anything. No 'Team = ' section anywhere in this text.
+      final text = 'LookupAndVerify\n$pos,$origFirst,$origLast,$origJersey';
+
+      final buf = StringBuffer();
+      final prevHandler = Logger.logHandler;
+      Logger.logHandler = buf.write;
+      try {
+        collectPlayerNamesFromText(tool, text);
+      } finally {
+        Logger.logHandler = prevHandler;
+      }
+
+      expect(buf.toString(), isNot(contains('Performing player name space check')),
+          reason: 'A pure LookupAndVerify script should never engage the '
+              'S3b budget check.');
+    });
+
+    test('a pure LookupPlayer script (no Team= section) does not trigger the check', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      final pos = tool.GetPlayerPosition(0);
+      final origFirst = tool.GetPlayerFirstName(0);
+      final origLast = tool.GetPlayerLastName(0);
+      // Read-only: returns matching players' data, never writes anything.
+      // No 'Team = ' section anywhere in this text.
+      final text = 'LookupPlayer\n$pos,$origFirst,$origLast';
+
+      final buf = StringBuffer();
+      final prevHandler = Logger.logHandler;
+      Logger.logHandler = buf.write;
+      try {
+        collectPlayerNamesFromText(tool, text);
+      } finally {
+        Logger.logHandler = prevHandler;
+      }
+
+      expect(buf.toString(), isNot(contains('Performing player name space check')),
+          reason: 'A pure LookupPlayer script should never engage the '
+              'S3b budget check.');
+    });
+
     test('ordinary PlayerModification text (Team= sections) still triggers the check', () {
       final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
       final key = tool.GetKey(true, true);
