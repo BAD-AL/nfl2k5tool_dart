@@ -6,7 +6,19 @@ import 'dart:typed_data';
 
 import 'gamesave_tool.dart';
 import 'input_parser.dart';
+import 'logger.dart';
 import 'player_names.dart';
+
+/// Matches an uncommented line containing 'lookupandmodify' anywhere in
+/// [text] — the marker InputParser itself looks for to enter
+/// ParsingStates.PlayerLookupAndApply (see input_parser.dart:175).
+final RegExp _uncommentedLookupAndModifyRe =
+    RegExp(r'^\s*(?!#).*lookupandmodify', caseSensitive: false, multiLine: true);
+
+/// Matches an uncommented 'Team = X' line anywhere in [text] — the marker
+/// that enters ParsingStates.PlayerModification (see InputParser.mTeamRegex).
+final RegExp _uncommentedTeamSectionRe =
+    RegExp(r'^\s*(?!#).*Team\s*=\s*[0-9a-zA-Z]+', caseSensitive: false, multiLine: true);
 
 /// Pass 1 (collect): builds a PlayerNames baseline from [tool]'s current
 /// save data, then replays [text] through InputParser once so every pending
@@ -16,9 +28,26 @@ import 'player_names.dart';
 /// [GameSaveData] before the caller knows whether a name commit will even
 /// succeed, so a pre-write snapshot is taken first and stored on [names] for
 /// [commitPlayerNamesAndApplyRest] to restore from if the commit fails.
+///
+/// Exception: a pure LookupAndModify script (no Team= section) never
+/// touches PlayerModification-mode edits — FindPlayer's exact-match lookup
+/// means any name it "reapplies" is always byte-identical to what's already
+/// there, so the S3b budget check has nothing to protect and is skipped
+/// entirely; [text] is instead run straight through the original,
+/// pre-PlayerNames InputParser path (see [PlayerNames.bypassed]).
 PlayerNames collectPlayerNamesFromText(GamesaveTool tool, String text) {
   final names = PlayerNames.fromTool(tool);
   names.preCollectSnapshot = Uint8List.fromList(tool.GameSaveData!);
+
+  final bypass = _uncommentedLookupAndModifyRe.hasMatch(text) &&
+      !_uncommentedTeamSectionRe.hasMatch(text);
+  if (bypass) {
+    names.bypassed = true;
+    InputParser(tool).ProcessText(text);
+    return names;
+  }
+
+  Logger.log('Performing player name space check');
   final parser = InputParser(tool)
     ..NameSetter = (player, isLastName, value, useExistingName) {
       if (player < GamesaveTool.FirstDraftClassPlayer) {
@@ -59,7 +88,18 @@ void _writeDraftClassName(
 /// ever ran and the second pass is skipped — the caller can treat this as
 /// "nothing was saved," even though the collect pass already wrote non-name
 /// attributes in the meantime.
+///
+/// If [names] is [PlayerNames.bypassed], [collectPlayerNamesFromText] already
+/// ran [text] through the original, unchecked InputParser path in full —
+/// there's nothing left to commit or replay, so this returns immediately.
 CommitResult commitPlayerNamesAndApplyRest(GamesaveTool tool, String text, PlayerNames names) {
+  if (names.bypassed) {
+    return CommitResult(
+      success: true,
+      bytesUsed: names.requiredBytes,
+      bytesFree: PlayerNames.budget - names.requiredBytes,
+    );
+  }
   final result = names.commit();
   if (!result.success) {
     final snapshot = names.preCollectSnapshot;

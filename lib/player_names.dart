@@ -161,6 +161,14 @@ class PlayerNames {
   /// directly via [fromTool] for planning/inspection with no text pass.
   Uint8List? preCollectSnapshot;
 
+  /// Set by collectPlayerNamesFromText when [text] is a pure LookupAndModify
+  /// script (no Team= section) — the S3b budget check is skipped entirely
+  /// for such text (see player_names_apply.dart), so this instance's model
+  /// was never used to gate or commit anything. commitPlayerNamesAndApplyRest
+  /// checks this to skip straight to a no-op success instead of calling
+  /// commit() against a model nothing was ever validated or written through.
+  bool bypassed = false;
+
   PlayerNames._(this.tool);
 
   factory PlayerNames.fromTool(GamesaveTool tool) {

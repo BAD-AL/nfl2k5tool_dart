@@ -791,4 +791,56 @@ void main() {
           reason: 'The pre-existing alias must survive an unrelated commit unchanged');
     });
   });
+
+  // T-PN-18 — Name-space check scoping. The S3b budget check exists to
+  // protect real PlayerModification-mode edits (Team=-based text). A pure
+  // LookupAndModify script never touches that path — FindPlayer's exact-
+  // match requirement means the fname/lname it "reapplies" is always
+  // byte-identical to what's already there — so engaging the check for it
+  // is pure overhead with no protective value, and risks a false-positive
+  // dialog for an operation that was never going to change any name.
+  group('T-PN-18 Name-space check scoping', () {
+    test('a pure LookupAndModify script (no Team= section) does not trigger the check', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      final pos = tool.GetPlayerPosition(0);
+      final origFirst = tool.GetPlayerFirstName(0);
+      final origLast = tool.GetPlayerLastName(0);
+      // Looks up player 0 by their current name and changes JerseyNumber —
+      // the realistic shape of a LookupAndModify line: identify by name,
+      // modify something else. No 'Team = ' section anywhere in this text.
+      final text = 'LookupAndModify\n$pos,$origFirst,$origLast,77';
+
+      final buf = StringBuffer();
+      final prevHandler = Logger.logHandler;
+      Logger.logHandler = buf.write;
+      try {
+        collectPlayerNamesFromText(tool, text);
+      } finally {
+        Logger.logHandler = prevHandler;
+      }
+
+      expect(buf.toString(), isNot(contains('Performing player name space check')),
+          reason: 'A pure LookupAndModify script should never engage the '
+              'S3b budget check.');
+    });
+
+    test('ordinary PlayerModification text (Team= sections) still triggers the check', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      final key = tool.GetKey(true, true);
+      final text = '$key\n${tool.GetLeaguePlayers(true, true, false)}';
+
+      final buf = StringBuffer();
+      final prevHandler = Logger.logHandler;
+      Logger.logHandler = buf.write;
+      try {
+        collectPlayerNamesFromText(tool, text);
+      } finally {
+        Logger.logHandler = prevHandler;
+      }
+
+      expect(buf.toString(), contains('Performing player name space check'),
+          reason: 'Ordinary Team=-based player edits must still be checked '
+              'against the S3b budget.');
+    });
+  });
 }
