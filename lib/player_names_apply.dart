@@ -9,30 +9,18 @@ import 'input_parser.dart';
 import 'logger.dart';
 import 'player_names.dart';
 
-/// Matches an uncommented line containing 'lookupandmodify' anywhere in
-/// [text] — the marker InputParser itself looks for to enter
-/// ParsingStates.PlayerLookupAndApply (see input_parser.dart:175). Case-
-/// insensitive, matching InputParser's own `.toLowerCase().contains(...)` check.
-final RegExp _uncommentedLookupAndModifyRe =
-    RegExp(r'^\s*(?!#).*lookupandmodify', caseSensitive: false, multiLine: true);
-
-/// Matches an uncommented line containing 'lookupandverify' anywhere in
-/// [text] — enters ParsingStates.PlayerLookupAndVerify (input_parser.dart:178),
-/// a read-only mode that never calls NameSetter at all (see
-/// _lookupPlayerAndVerify). Case-insensitive, same reason as above.
-final RegExp _uncommentedLookupAndVerifyRe =
-    RegExp(r'^\s*(?!#).*lookupandverify', caseSensitive: false, multiLine: true);
-
-/// Matches an uncommented line *starting with* 'LookupPlayer' — enters
-/// ParsingStates.PlayerLookup (input_parser.dart:211), another read-only,
-/// NameSetter-free mode (see LookupPlayer()). Case-SENSITIVE and anchored to
-/// the line start, matching InputParser's own `line.startsWith('LookupPlayer')`
-/// check exactly — unlike the two above, that check doesn't lowercase first.
-final RegExp _uncommentedLookupPlayerRe =
-    RegExp(r'^\s*(?!#)LookupPlayer', multiLine: true);
-
-/// Matches an uncommented 'Team = X' line anywhere in [text] — the marker
-/// that enters ParsingStates.PlayerModification (see InputParser.mTeamRegex).
+/// Matches an uncommented 'Team = X' line anywhere in [text] — the only
+/// thing that enters ParsingStates.PlayerModification, InputParser's one
+/// state that performs real, budget-relevant name writes (see
+/// InputParser.mTeamRegex). Every other state — PlayerLookupAndApply
+/// ('LookupAndModify'), PlayerLookupAndVerify ('LookupAndVerify'), and
+/// PlayerLookup (bare 'LookupPlayer') — either can't change a name's value
+/// (LookupAndModify's FindPlayer lookup is exact-match, so any name it
+/// "reapplies" is always byte-identical to what's already there) or never
+/// calls NameSetter at all (the other two are read-only). So the presence
+/// or absence of those specific markers doesn't actually matter to this
+/// decision — only whether PlayerModification is ever entered does, and
+/// that's exactly what this single check answers.
 final RegExp _uncommentedTeamSectionRe =
     RegExp(r'^\s*(?!#).*Team\s*=\s*[0-9a-zA-Z]+', caseSensitive: false, multiLine: true);
 
@@ -45,23 +33,18 @@ final RegExp _uncommentedTeamSectionRe =
 /// succeed, so a pre-write snapshot is taken first and stored on [names] for
 /// [commitPlayerNamesAndApplyRest] to restore from if the commit fails.
 ///
-/// Exception: text with no Team= section, that's instead a pure
-/// LookupAndModify, LookupAndVerify, or bare LookupPlayer script, never
-/// touches PlayerModification-mode edits: LookupAndModify's FindPlayer
-/// exact-match lookup means any name it "reapplies" is always byte-identical
-/// to what's already there, and LookupAndVerify/LookupPlayer are read-only
-/// and never call NameSetter at all. Either way the S3b budget check has
-/// nothing to protect and is skipped entirely; [text] is instead run
-/// straight through the original, pre-PlayerNames InputParser path (see
-/// [PlayerNames.bypassed]).
+/// Exception: text with no Team= section never enters PlayerModification —
+/// InputParser's one state that performs real, budget-relevant name writes
+/// (see _uncommentedTeamSectionRe's doc comment for why nothing else that
+/// can appear in [text] needs separate handling here). The S3b budget check
+/// has nothing to protect in that case and is skipped entirely; [text] is
+/// instead run straight through the original, pre-PlayerNames InputParser
+/// path (see [PlayerNames.bypassed]).
 PlayerNames collectPlayerNamesFromText(GamesaveTool tool, String text) {
   final names = PlayerNames.fromTool(tool);
   names.preCollectSnapshot = Uint8List.fromList(tool.GameSaveData!);
 
-  final bypass = (_uncommentedLookupAndModifyRe.hasMatch(text) ||
-          _uncommentedLookupAndVerifyRe.hasMatch(text) ||
-          _uncommentedLookupPlayerRe.hasMatch(text)) &&
-      !_uncommentedTeamSectionRe.hasMatch(text);
+  final bypass = !_uncommentedTeamSectionRe.hasMatch(text);
   if (bypass) {
     names.bypassed = true;
     InputParser(tool).ProcessText(text);

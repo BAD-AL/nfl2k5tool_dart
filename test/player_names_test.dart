@@ -793,12 +793,15 @@ void main() {
   });
 
   // T-PN-18 — Name-space check scoping. The S3b budget check exists to
-  // protect real PlayerModification-mode edits (Team=-based text). A pure
-  // LookupAndModify script never touches that path — FindPlayer's exact-
-  // match requirement means the fname/lname it "reapplies" is always
-  // byte-identical to what's already there — so engaging the check for it
-  // is pure overhead with no protective value, and risks a false-positive
-  // dialog for an operation that was never going to change any name.
+  // protect real PlayerModification-mode edits, and Team= is the only thing
+  // that ever enters that state — so the check's bypass rule is exactly
+  // "no uncommented Team= line anywhere in the text", full stop. It doesn't
+  // matter *why* PlayerModification is absent (a LookupAndModify/
+  // LookupAndVerify/LookupPlayer script, or nothing recognized at all) —
+  // none of those other states can produce a real, budget-relevant name
+  // write, so engaging the check for any of them is pure overhead with no
+  // protective value, and risks a false-positive dialog for an operation
+  // that was never going to change any name.
   group('T-PN-18 Name-space check scoping', () {
     test('a pure LookupAndModify script (no Team= section) does not trigger the check', () {
       final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
@@ -888,6 +891,30 @@ void main() {
       expect(buf.toString(), contains('Performing player name space check'),
           reason: 'Ordinary Team=-based player edits must still be checked '
               'against the S3b budget.');
+    });
+
+    test('text with no Team= and no recognized lookup marker either still '
+        'does not trigger the check', () {
+      // The bypass rule is purely "no Team=", not "one of these specific
+      // markers is present" — this is the concrete behavior difference from
+      // the earlier, enumerated-marker version of this rule: unrecognized
+      // (but harmless — no player lines at all) text now bypasses too.
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_franchise));
+      const text = 'Key=fname,lname,Position,JerseyNumber\n'
+          '# just a comment, no Team= section anywhere\n';
+
+      final buf = StringBuffer();
+      final prevHandler = Logger.logHandler;
+      Logger.logHandler = buf.write;
+      try {
+        collectPlayerNamesFromText(tool, text);
+      } finally {
+        Logger.logHandler = prevHandler;
+      }
+
+      expect(buf.toString(), isNot(contains('Performing player name space check')),
+          reason: 'No Team= section means PlayerModification is never '
+              'entered, regardless of whether any other marker is present.');
     });
   });
 }
