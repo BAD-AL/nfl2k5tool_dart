@@ -46,6 +46,17 @@ class InputParser {
   /// every existing caller.
   void Function(int player, bool isLastName, String text, bool useExistingName)? NameSetter;
 
+  /// When set, coach FirstName/LastName/Info1/Info2/Info3 writes are routed
+  /// here instead of calling Tool.SetCoachAttribute directly — used by
+  /// CoachStrings' collect/commit flow (see coach_strings_apply.dart) so
+  /// coach-string-pool decisions can be made before any bytes are written.
+  /// Null (the default) preserves today's direct-write behavior for every
+  /// existing caller. Every other coach attribute (Body, Photo, stats, ...)
+  /// always goes straight through Tool.SetCoachAttribute regardless — this
+  /// hook only ever sees the five string fields, since those are the only
+  /// ones sharing the fixed-size coach-string pool CoachStrings models.
+  void Function(int teamIndex, CoachOffsets attr, String text)? CoachStringSetter;
+
   GamesaveTool Tool;
 
   InputParser(this.Tool);
@@ -387,21 +398,44 @@ class InputParser {
         switch (keyParts[i].toLowerCase()) {
           case 'firstname':
           case 'fname':
-            Tool.SetCoachAttribute(teamIndex, CoachOffsets.FirstName, parts[i]);
+            _SetCoachStringAttr(teamIndex, CoachOffsets.FirstName, parts[i]);
             break;
           case 'lastname':
           case 'lname':
-            Tool.SetCoachAttribute(teamIndex, CoachOffsets.LastName, parts[i]);
+            _SetCoachStringAttr(teamIndex, CoachOffsets.LastName, parts[i]);
             break;
           default:
             current = CoachOffsets.values.firstWhere(
                 (e) => e.name.toLowerCase() == keyParts[i].toLowerCase());
-            Tool.SetCoachAttribute(teamIndex, current, parts[i]);
+            if (current == CoachOffsets.Info1 ||
+                current == CoachOffsets.Info2 ||
+                current == CoachOffsets.Info3) {
+              _SetCoachStringAttr(teamIndex, current, parts[i]);
+            } else {
+              Tool.SetCoachAttribute(teamIndex, current, parts[i]);
+            }
         }
       }
     } catch (e) {
       StaticUtils.AddError(
           "Error setting data for line:\r\n$line\r\n\r\nPerhaps check '${current.name}' attribute.");
+    }
+  }
+
+  /// Routes one of the five coach string fields (FirstName/LastName/Info1/
+  /// Info2/Info3) through [CoachStringSetter] when set, else falls back to
+  /// the original direct Tool.SetCoachAttribute call. Strips CSV-escaping
+  /// quotes here (matching what Tool.SetCoachAttribute already does
+  /// internally for these fields) so [CoachStringSetter] always sees the
+  /// same clean text SetCoachAttribute would have stored — ParseCoachLine
+  /// converts delimiters-inside-quotes but never strips the quote
+  /// characters themselves.
+  void _SetCoachStringAttr(int teamIndex, CoachOffsets attr, String value) {
+    final cleaned = value.replaceAll('"', '');
+    if (CoachStringSetter != null) {
+      CoachStringSetter!(teamIndex, attr, cleaned);
+    } else {
+      Tool.SetCoachAttribute(teamIndex, attr, cleaned);
     }
   }
 

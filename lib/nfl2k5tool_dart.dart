@@ -2,6 +2,8 @@ export 'gamesave_tool.dart';
 export 'input_parser.dart';
 export 'player_names.dart';
 export 'player_names_apply.dart';
+export 'coach_strings.dart';
+export 'text_apply.dart';
 export 'enum_definitions.dart';
 export 'static_utils.dart';
 export 'data_map.dart';
