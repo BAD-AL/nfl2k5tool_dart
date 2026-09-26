@@ -213,6 +213,8 @@ class InputParser {
       Tool.AutoUpdatePBP();
     } else if (line == 'AutoUpdatePhoto') {
       Tool.AutoUpdatePhoto();
+    } else if (line == 'ClearHistoricPlayerStats') {
+      Tool.ClearHistoricPlayerStats();
     } else if (line.toLowerCase().startsWith('teamdatakey=')) {
       Tool.TeamKey = line.substring(12);
     } else if (line.toLowerCase().startsWith('teamdata,')) {

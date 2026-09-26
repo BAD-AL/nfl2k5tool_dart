@@ -998,6 +998,25 @@ class GamesaveTool {
     return 'DraftClass';
   }
 
+  /// Clears each player's stats-history pointer (offset +0x2C in the
+  /// player record) on a Roster save. Works around a bug in the original
+  /// game: starting a new Franchise from an edited Roster doesn't reset
+  /// this pointer for a slot whose player identity changed, so a new
+  /// player can inherit whatever real historical player used to occupy
+  /// that slot. No-op on Franchise saves -- never touches live season/
+  /// career stats.
+  void ClearHistoricPlayerStats() {
+    if (mSaveType != SaveType.Roster) return;
+    Logger.log('#ClearHistoricPlayerStats');
+    for (int player = 0; player < MaxPlayers; player++) {
+      final rec = mPlayerStart + player * _cPlayerDataLength;
+      SetByte(rec + 0x2c, 0);
+      SetByte(rec + 0x2d, 0);
+      SetByte(rec + 0x2e, 0);
+      SetByte(rec + 0x2f, 0);
+    }
+  }
+
   void AutoUpdatePBP() {
     Logger.log('#AutoUpdatePBP');
     String key, firstName, lastName, number, val;
