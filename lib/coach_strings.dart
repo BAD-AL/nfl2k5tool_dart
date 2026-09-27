@@ -152,12 +152,17 @@ class CoachStrings {
     }
 
     if (total > budget) {
+      final deficit = total - budget;
+      final chars = (deficit + 1) ~/ 2; // each character is 2 bytes (UTF-16LE); round up
       return CommitResult(
         success: false,
         bytesUsed: total,
         bytesFree: budget - total,
         warnings: [
-          'Coach strings: required $total bytes exceeds the $budget-byte budget by ${total - budget} bytes.'
+          'Coach strings: required $total bytes exceeds the $budget-byte budget by '
+              '$deficit bytes. Shorten one or more coaches\' names or Info fields in '
+              'the Text Editor by at least $chars characters ($deficit bytes), then '
+              'try again.'
         ],
       );
     }
