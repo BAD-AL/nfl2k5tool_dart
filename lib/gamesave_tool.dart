@@ -551,6 +551,12 @@ class GamesaveTool {
     }
   }
 
+  /// A team's currently-assigned playbook name -- e.g. "West Coast", not
+  /// the "PB_West_Coast" token GetTeamString returns. For checking against
+  /// [ValidPlaybookNames] without needing the private token/name helpers.
+  String GetTeamPlaybookName(int teamIndex) =>
+      _playbookTokenToName(GetTeamString(teamIndex, TeamDataOffsets.Playbook));
+
   void SetStadiumIndex(int teamIndex, int stadiumIndex) {
     if (teamIndex < 0 || teamIndex >= 32) return;
     if (!_stadiumShortNameAddresses.containsKey(stadiumIndex)) {
@@ -618,12 +624,20 @@ class GamesaveTool {
         return;
       case TeamDataOffsets.Playbook: {
         final name = _playbookTokenToName(value);
+        if (!ValidPlaybookNames.contains(name)) {
+          StaticUtils.AddError(
+              'SetTeamString: "$value" is not a valid playbook for '
+              '${sTeamsDataOrder[teamIndex]}. Valid playbooks: '
+              '${ValidPlaybookNames.map(_playbookNameToToken).join(', ')}');
+          return;
+        }
         final offAddr = _playbookOffAddr[name];
         final defAddr = _playbookDefAddr[name];
         if (offAddr == null || defAddr == null) {
           StaticUtils.AddError(
-              'SetTeamString: unknown playbook "$value" for ${sTeamsDataOrder[teamIndex]}. '
-              'Known: ${_playbookOffAddr.keys.map(_playbookNameToToken).join(', ')}');
+              'SetTeamString: "$value" is a valid playbook but its data '
+              'could not be found in this file for ${sTeamsDataOrder[teamIndex]} '
+              '(the file\'s playbook data may be corrupted).');
           return;
         }
         _writePointerToAddr(_cPlaybookTableBase + teamIndex * 8,     offAddr);
@@ -857,6 +871,15 @@ class GamesaveTool {
   static List<String> get Teams {
     return sTeamsDataOrder.sublist(0, 32);
   }
+
+  /// The fixed, real set of valid playbook names -- the 32 team names plus
+  /// the 4 generic playbooks. This never varies file to file (it's the
+  /// game's own hardcoded list), unlike _playbookOffAddr/_playbookDefAddr
+  /// below, which only record *where* a given playbook's string data lives
+  /// in a specific file. A playbook name failing this check is invalid
+  /// data, not something this tool should try to accommodate.
+  static List<String> get ValidPlaybookNames =>
+      [...Teams, 'West Coast', 'General', 'User A', 'User B'];
 
   int get MaxPlayers => mMaxPlayers;
 

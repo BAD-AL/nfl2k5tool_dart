@@ -19,6 +19,7 @@ void main() {
       expect(health.playerNamesOverBy, equals(0));
       expect(health.coachStringsOverBy, equals(0));
       expect(health.sharedNamePointers, isFalse);
+      expect(health.teamsWithInvalidPlaybooks, isEmpty);
     });
 
     test('stock roster file is healthy', () {
@@ -28,6 +29,7 @@ void main() {
       expect(health.playerNamesOverBy, equals(0));
       expect(health.coachStringsOverBy, equals(0));
       expect(health.sharedNamePointers, isFalse);
+      expect(health.teamsWithInvalidPlaybooks, isEmpty);
     });
   });
 
@@ -38,6 +40,15 @@ void main() {
       expect(health.hasAnyIssue, isTrue);
       expect(health.playerNamesOverBy, greaterThan(0));
       expect(health.sharedNamePointers, isTrue);
+    });
+  });
+
+  group('T-SFH-3 A known-bad file reports its invalid playbook', () {
+    test('NFL27Fra.zip flags the Redskins\' invalid playbook', () {
+      final tool = GamesaveTool()..LoadSaveFile(testFile(_knownBad));
+      final health = checkSaveFileHealth(tool);
+      expect(health.hasAnyIssue, isTrue);
+      expect(health.teamsWithInvalidPlaybooks, equals(['Redskins']));
     });
   });
 }
