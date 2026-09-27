@@ -157,7 +157,7 @@ class CoachStrings {
         bytesUsed: total,
         bytesFree: budget - total,
         warnings: [
-          'Required $total bytes exceeds the $budget-byte budget by ${total - budget} bytes.'
+          'Coach strings: required $total bytes exceeds the $budget-byte budget by ${total - budget} bytes.'
         ],
       );
     }
