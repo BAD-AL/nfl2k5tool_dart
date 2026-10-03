@@ -204,7 +204,8 @@ class InputParser {
       mScheduleList!.add(line);
     } else if (mYearRegex.firstMatch(line) != null) {
       SetYear(line);
-    } else if (line.startsWith('KR1,') || line.startsWith('KR2,') ||
+    } else if (line.startsWith('Holder,') || line.startsWith('KR1,') ||
+               line.startsWith('KR2,') || line.startsWith('PK,') ||
                line.startsWith('PR,')  || line.startsWith('LS,')) {
       SetSpecialTeamPlayer(line);
     } else if (line == 'AutoUpdateDepthChart') {

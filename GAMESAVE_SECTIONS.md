@@ -50,8 +50,62 @@ Base address of team `i`: `m49ersPlayerPointersStart + i × 0x1F4`
 | `+0x154` | 1 byte | Logo / PBP index | Same numeric value as stadium index for all 32 NFL teams. Also stored as a 2-char decimal UTF-16LE string in S3a field 2 (kept in sync on write) |
 | `+0x156` | 30 bytes | Uniform year data | 15 × uint16 LE — start/end year pairs for each selectable jersey uniform, matching the uniform selection list order |
 | `+0x192` | 1 byte | Default jersey index | 0-based index into this team's jersey selection list. Variable count per team (up to 15 entries for some teams) |
+| `+0x194` | 1 byte | Holder (FG/PAT) | Roster-local index (into this team's player pointer array, `+0x000`) of the field-goal/PAT holder. See "Special Teamer Slots" below |
+| `+0x195` | 1 byte | Kick returner 1 (KR1) | Roster-local index of the primary kick returner |
+| `+0x196` | 1 byte | Kick returner 2 (KR2) | Roster-local index of the backup kick returner |
+| `+0x197` | 1 byte | Placekicker (PK) | Roster-local index of the placekicker |
+| `+0x198` | 1 byte | Long snapper (LS) | Roster-local index of the long snapper |
+| `+0x199` | 1 byte | Punt returner (PR) | Roster-local index of the punt returner |
 
 **Free Agents** player pointer list is not stored in a team block; its location is read from `mFreeAgentPlayersPointer` (see Constants).
+
+### Special Teamer Slots (`+0x194`–`+0x199`)
+
+Six contiguous 1-byte slots, each holding a **roster-local index** (an index
+into that team's player pointer array at `+0x000`, *not* a global player
+index) of the player assigned to that special-teams role. `GamesaveTool`
+models these as the `SpecialTeamer` enum (`Holder`, `KR1`, `KR2`, `PK`,
+`LS`, `PR`) and exposes them via `GetSpecialTeamPosition`/
+`SetSpecialTeamPosition`, editable as `Holder,POS#` / `KR1,POS#` / etc.
+lines in the text format (see `InputParser.SetSpecialTeamPlayer`).
+
+`PK` is named that (not `K`) deliberately: a player-data line's first field
+is that player's Position, so a kicker's own row literally starts with
+`K,` — using `K,` as a text-format dispatch prefix would hijack every
+kicker's row. `Holder,` has no such collision (no position is named
+"Holder").
+
+**Holder confirmed against the stock 2004 roster** (`Base2004Fran_un-modded.zip`):
+checked all 32 teams' `+0x194` byte against each team's starting punter.
+17/32 teams use the punter as holder; the rest use a backup QB (14/32,
+e.g. Bears → Craig Krenzel, Broncos → Danny Kanell), one uses the
+*starting* QB (Seahawks → Matt Hasselbeck), and one uses a 3rd-string WR
+(Rams → Dane Looker) — i.e. it is a genuinely independent, per-team
+assignment, not simply "whoever is the punter." `KR1`/`KR2`/`LS`/`PR` were
+already known (used by `AutoUpdateSpecialTeams`); `PK`'s offset was found
+by scanning the byte window around the known special-teamer slots and
+checking which offset resolves to the team's kicker in all 32/32 teams.
+
+**Holder is not duplicated/derived elsewhere in the file.** The "Depth
+charts + misc. game data" region noted in the High-Level File Layout table
+(`0x32D34`–`0x75960` Roster / `0x3AACC`–`0x75C40` Franchise) is a large,
+still-unmapped catch-all whose description ("depth-chart orders... +
+special teams; schedule; other game state") was speculative, not verified.
+Confirmed it holds no mirror of these bytes by loading the same file into
+two `GamesaveTool` instances, changing only one team's Holder via
+`SetSpecialTeamPosition`, and diffing the two in-memory buffers byte for
+byte across the entire ~720KB file: exactly one byte differed, at the
+expected team-block offset (`0x4830` for the Bears in
+`Base2004Fran_Orig.zip`). Nothing in that other region moved. The same
+reasoning applies to `KR1`/`KR2`/`PK`/`LS`/`PR` (same storage mechanism,
+same block).
+
+`AutoUpdateDepthChart()` (→ `AutoUpdateSpecialTeams` per team) now also
+sets `Holder` to the team's punter automatically, alongside its existing
+`KR1`/`KR2`/`PR`/`LS` auto-assignment -- a sensible default given 17/32
+stock teams already use the punter, and every team has exactly one punter
+to fall back on (unlike "fastest returner," which needs a speed
+comparison).
 
 ---
 

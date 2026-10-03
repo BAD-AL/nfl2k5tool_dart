@@ -1248,6 +1248,7 @@ class GamesaveTool {
     int fast1 = playerIndexes.length - 1;
     int fast2 = playerIndexes.length - 2;
     int center = 0;
+    int punter = 0;
     int speedTest1 = 0;
     int speedTest2 = 0;
     String playerPosition = '';
@@ -1267,12 +1268,18 @@ class GamesaveTool {
         }
       } else if (playerPosition == 'C,' && center == 0) {
         center = i;
+      } else if (playerPosition == 'P,' && punter == 0) {
+        punter = i;
       }
     }
     SetByte(teamPlayerPointersStart + SpecialTeamer.KR1.value, fast1);
     SetByte(teamPlayerPointersStart + SpecialTeamer.KR2.value, fast2);
     SetByte(teamPlayerPointersStart + SpecialTeamer.PR.value, fast1);
     SetByte(teamPlayerPointersStart + SpecialTeamer.LS.value, center);
+    // Stock roster has the punter holding on roughly half of teams and a
+    // backup QB on the rest (see GAMESAVE_SECTIONS.md, "Special Teamer
+    // Slots") -- the punter is the sensible, always-available default here.
+    SetByte(teamPlayerPointersStart + SpecialTeamer.Holder.value, punter);
   }
 
   bool IsStarter(int depth) {
@@ -1281,9 +1288,13 @@ class GamesaveTool {
 
   String GetSpecialTeamDepthChart(String team) {
     StringBuffer builder = StringBuffer();
+    builder.write(GetSpecialTeamPosition(team, SpecialTeamer.Holder));
+    builder.write('\r\n');
     builder.write(GetSpecialTeamPosition(team, SpecialTeamer.KR1));
     builder.write('\r\n');
     builder.write(GetSpecialTeamPosition(team, SpecialTeamer.KR2));
+    builder.write('\r\n');
+    builder.write(GetSpecialTeamPosition(team, SpecialTeamer.PK));
     builder.write('\r\n');
     builder.write(GetSpecialTeamPosition(team, SpecialTeamer.PR));
     builder.write('\r\n');

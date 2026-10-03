@@ -195,8 +195,14 @@ enum Game {
 }
 
 enum SpecialTeamer {
+  Holder(0x194),
   KR1(0x195),
   KR2(0x196),
+  // Named 'PK' (not 'K') because a player-data line's first field is that
+  // player's Position -- a line for any kicker literally starts with "K,",
+  // which would collide with a top-level 'K,' dispatch prefix in
+  // input_parser.dart and hijack every kicker's row.
+  PK(0x197),
   LS(0x198),
   PR(0x199);
 
