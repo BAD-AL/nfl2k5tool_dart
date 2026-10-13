@@ -1722,7 +1722,7 @@ class GamesaveTool {
         //PowerRunStyle style = PowerRunStyle.values.firstWhere((e) => e.name == stringVal);
         //SetByte(loc, style.value);
         final powerRunStyleNumeric = int.tryParse(stringVal);
-        SetByte(loc, powerRunStyleNumeric ?? PowerRunStyle.values.firstWhere((e) => e.name == stringVal).index);
+        SetByte(loc, powerRunStyleNumeric ?? PowerRunStyle.values.firstWhere((e) => e.name == stringVal).value);
         break;
       case PlayerOffsets.Face:
         final faceNumeric = int.tryParse(stringVal);
